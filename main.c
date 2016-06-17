@@ -6,24 +6,31 @@ const float g_vertex_buffer_data[] = {
     0.75f, 0.75f, 0.0f, 1.0f,
     0.75f, -0.75f, 0.0f, 1.0f,
     -0.75f, -0.75f, 0.0f, 1.0f,
+    1.00f, 0.00f, 0.00f, 1.00f,
+    0.00f, 1.00f, 0.00f, 1.00f,
+    0.00f, 0.00f, 1.00f, 1.00f,
 };
 
 const char* vertex_shader =
 "#version 330\n"
 
 "layout(location = 0) in vec4 position;"
+"layout(location = 1) in vec4 in_color;"
+"smooth out vec4 vertex_color;"
 "void main()"
 "{"
 "    gl_Position = position;"
+"    vertex_color = in_color;"
 "}";
 
 const char* frag_shader =
 "#version 330\n"
 
-"out vec4 outputColor;"
+"out vec4 output_color;"
+"smooth in vec4 vertex_color;"
 "void main()"
 "{"
-"   outputColor = vec4(1.0f, 1.0f, 1.0f, 1.0f);"
+"   output_color = vertex_color;"
 "}";
 
 GLuint shader_program;
@@ -38,12 +45,14 @@ void draw(void) {
     glUseProgram(shader_program);
 
     glBindBuffer(GL_ARRAY_BUFFER, pos_buffer_obj);
-    glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, (void *) 48);
 
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-
     glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
     glUseProgram(0);
 
     glutSwapBuffers();
@@ -129,7 +138,7 @@ int main(int argc, char **argv) {
 
     glutInitDisplayMode(GLUT_RGBA|GLUT_SINGLE|GLUT_MULTISAMPLE);
     glutDisplayFunc(draw);
-    glutIdleFunc(draw);
+    //glutIdleFunc(draw);
     glutReshapeFunc(changeSize);
     glutKeyboardFunc(handle_key);
 
