@@ -1,25 +1,44 @@
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 #include <stdio.h>
+#include <string.h>
 
 const float g_vertex_buffer_data[] = {
-    0.75f, 0.75f, 0.0f, 1.0f,
-    0.75f, -0.75f, 0.0f, 1.0f,
-    -0.75f, -0.75f, 0.0f, 1.0f,
-    1.00f, 0.00f, 0.00f, 1.00f,
-    0.00f, 1.00f, 0.00f, 1.00f,
-    0.00f, 0.00f, 1.00f, 1.00f,
+    0.0f, 0.0f, 0.0f, 1.0f,
+    0.0f, 0.0f, -1.0f, 1.0f,
+    -1.0f, 0.0f, -1.0f, 1.0f,
+    -1.0f, 0.0f, 0.0f, 1.0f,
+    -1.0f, 1.0f, 0.0f, 1.0f,
+    0.0f, 1.0f, 0.0f, 1.0f,
+    0.0f, 1.0f, -1.0f, 1.0f,
+    0.0f, 0.0f, -1.0f, 1.0f,
+
+
+    1.0f, 0.0f, 0.0f, 1.0f,
+    1.0f, 0.0f, 0.0f, 1.0f,
+    1.0f, 0.0f, 0.0f, 1.0f,
+    1.0f, 0.0f, 0.0f, 1.0f,
+    0.0f, 1.0f, 0.0f, 1.0f,
+    0.0f, 1.0f, 0.0f, 1.0f,
+    0.0f, 0.0f, 1.0f, 1.0f,
+    0.0f, 0.0f, 1.0f, 1.0f,
 };
+
 
 const char* vertex_shader =
 "#version 330\n"
 
 "layout(location = 0) in vec4 position;"
 "layout(location = 1) in vec4 in_color;"
-"smooth out vec4 vertex_color;"
+"flat out vec4 vertex_color;"
+
+"uniform vec2 offset;"
+"uniform mat4 perspectiveMatrix;"
+
 "void main()"
 "{"
-"    gl_Position = position;"
+"    vec4 cameraPos = position + vec4(offset.x, offset.y, -2, 0.0);"
+"    gl_Position = perspectiveMatrix * cameraPos;"
 "    vertex_color = in_color;"
 "}";
 
@@ -27,7 +46,7 @@ const char* frag_shader =
 "#version 330\n"
 
 "out vec4 output_color;"
-"smooth in vec4 vertex_color;"
+"flat in vec4 vertex_color;"
 "void main()"
 "{"
 "   output_color = vertex_color;"
@@ -45,12 +64,16 @@ void draw(void) {
     glUseProgram(shader_program);
 
     glBindBuffer(GL_ARRAY_BUFFER, pos_buffer_obj);
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, (void *) 48);
 
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    // // the color. 64 = sizeof(float) * 4 dimension * 8 of them
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(g_vertex_buffer_data) / 2));
+
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 8);
+
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glUseProgram(0);
@@ -142,10 +165,6 @@ int main(int argc, char **argv) {
     glutReshapeFunc(changeSize);
     glutKeyboardFunc(handle_key);
 
-    // glutSetOption(GLUT_MULTISAMPLE, 16);
-    // glEnable(GL_MULTISAMPLE);
-    // glHint(GL_MULTISAMPLE_FILTER_HINT_NV, GL_NICEST);
-
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_shader);
     GLuint fs = compile_shader(GL_FRAGMENT_SHADER, frag_shader);
     shader_program = make_shader_program(2, vs, fs);
@@ -160,6 +179,29 @@ int main(int argc, char **argv) {
     GLuint vao;
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
+
+    GLuint offsetUniform;
+    GLuint perspectiveMatrixUnif;
+
+    offsetUniform = glGetUniformLocation(shader_program, "offset");
+
+    perspectiveMatrixUnif = glGetUniformLocation(shader_program, "perspectiveMatrix");
+
+    float fFrustumScale = 1.0f; float fzNear = 0.5f; float fzFar = 3.0f;
+
+    float theMatrix[16];
+    memset(theMatrix, 0, sizeof(float) * 16);
+
+    theMatrix[0] = fFrustumScale;
+    theMatrix[5] = fFrustumScale;
+    theMatrix[10] = (fzFar + fzNear) / (fzNear - fzFar);
+    theMatrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
+    theMatrix[11] = -1.0f;
+
+    glUseProgram(shader_program);
+    glUniform2f(offsetUniform, -0.75f, 0.75f);
+    glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, theMatrix);
+    glUseProgram(0);
 
  //   glutFullScreen();
     glutMainLoop();
