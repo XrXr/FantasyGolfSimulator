@@ -198,6 +198,10 @@ int main(int argc, char **argv) {
     theMatrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
     theMatrix[11] = -1.0f;
 
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CW);
+
     glUseProgram(shader_program);
     glUniform2f(offsetUniform, -0.75f, 0.75f);
     glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, theMatrix);
