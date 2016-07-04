@@ -2,6 +2,7 @@
 #include <GL/freeglut.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 const float g_vertex_buffer_data[] = {
     0.0f, 0.0f, 0.0f, 1.0f,
@@ -34,10 +35,12 @@ const char* vertex_shader =
 
 "uniform vec2 offset;"
 "uniform mat4 perspectiveMatrix;"
+"uniform float zoom;"
 
 "void main()"
 "{"
 "    vec4 cameraPos = position + vec4(offset.x, offset.y, -2, 0.0);"
+"    cameraPos = cameraPos * vec4(zoom, zoom, 1, 1);"
 "    gl_Position = perspectiveMatrix * cameraPos;"
 "    vertex_color = in_color;"
 "}";
@@ -54,14 +57,21 @@ const char* frag_shader =
 
 GLuint shader_program;
 GLuint pos_buffer_obj;
-
-float last = 0;
+GLuint zoom_uniform;
+GLuint offsetUniform;
+float zoom = 1.0f;
+struct {
+    float x;
+    float y;
+} translate_offset = {0, 0};
 
 void draw(void) {
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     glUseProgram(shader_program);
+    glUniform1f(zoom_uniform, zoom);
+    glUniform2f(offsetUniform, translate_offset.x, translate_offset.y);
 
     glBindBuffer(GL_ARRAY_BUFFER, pos_buffer_obj);
 
@@ -79,6 +89,7 @@ void draw(void) {
     glUseProgram(0);
 
     glutSwapBuffers();
+    glutPostRedisplay();
 }
 
 void handle_key(unsigned char key, int x, int y) {
@@ -86,6 +97,32 @@ void handle_key(unsigned char key, int x, int y) {
     if (key == 17 && glutGetModifiers() == GLUT_ACTIVE_CTRL)
         glutLeaveMainLoop();
 }
+
+void handle_special(int key, int x, int y) {
+    const float step = 0.025f;
+
+    switch(key) {
+        case GLUT_KEY_HOME:
+            zoom += step;
+            break;
+        case GLUT_KEY_END:
+            zoom = fmax(0, zoom - step);
+            break;
+        case GLUT_KEY_LEFT:
+            translate_offset.x -= step;
+            break;
+        case GLUT_KEY_RIGHT:
+            translate_offset.x += step;
+            break;
+        case GLUT_KEY_UP:
+            translate_offset.y += step;
+            break;
+        case GLUT_KEY_DOWN:
+            translate_offset.y -= step;
+            break;
+    }
+}
+
 void changeSize(int w, int h) {
     glViewport(0, 0, w, h);
 }
@@ -164,6 +201,7 @@ int main(int argc, char **argv) {
     //glutIdleFunc(draw);
     glutReshapeFunc(changeSize);
     glutKeyboardFunc(handle_key);
+    glutSpecialFunc(handle_special);
 
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_shader);
     GLuint fs = compile_shader(GL_FRAGMENT_SHADER, frag_shader);
@@ -180,12 +218,11 @@ int main(int argc, char **argv) {
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
 
-    GLuint offsetUniform;
     GLuint perspectiveMatrixUnif;
 
     offsetUniform = glGetUniformLocation(shader_program, "offset");
-
     perspectiveMatrixUnif = glGetUniformLocation(shader_program, "perspectiveMatrix");
+    zoom_uniform = glGetUniformLocation(shader_program, "zoom");
 
     float fFrustumScale = 1.0f; float fzNear = 0.5f; float fzFar = 3.0f;
 
@@ -203,8 +240,9 @@ int main(int argc, char **argv) {
     glFrontFace(GL_CW);
 
     glUseProgram(shader_program);
-    glUniform2f(offsetUniform, -0.75f, 0.75f);
+    glUniform2f(offsetUniform, 0.0f, 0.0f);
     glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, theMatrix);
+    glUniform1f(zoom_uniform, 100.0f);
     glUseProgram(0);
 
  //   glutFullScreen();

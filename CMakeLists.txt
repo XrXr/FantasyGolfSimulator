@@ -1,6 +1,9 @@
 cmake_minimum_required (VERSION 3.5.2)
 project (FantasyGolfSimulator)
 
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
 find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
@@ -16,5 +19,6 @@ target_link_libraries(golf_sim
     ${OPENGL_LIBRARIES}
     ${GLUT_LIBRARIES}
     ${GLEW_LIBRARIES}
+    m
 )
 
