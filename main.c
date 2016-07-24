@@ -2,6 +2,7 @@
 #include <GL/freeglut.h>
 #include <stdio.h>
 #include <string.h>
+#define _USE_MATH_DEFINES
 #include <math.h>
 
 const float g_vertex_buffer_data[] = {
@@ -35,12 +36,15 @@ const char* vertex_shader =
 
 "uniform vec2 offset;"
 "uniform mat4 perspectiveMatrix;"
+"uniform mat4 transform;"
 "uniform float zoom;"
 
 "void main()"
 "{"
-"    vec4 cameraPos = position + vec4(offset.x, offset.y, -2, 0.0);"
-"    cameraPos = cameraPos * vec4(zoom, zoom, 1, 1);"
+"    vec4 cameraPos = position;"
+"    cameraPos = transform * cameraPos;"
+"    cameraPos = cameraPos + vec4(offset.x, offset.y, 2, 0.0);"
+"    cameraPos = cameraPos * vec4(zoom, zoom, -1, 1);"
 "    gl_Position = perspectiveMatrix * cameraPos;"
 "    vertex_color = in_color;"
 "}";
@@ -59,11 +63,13 @@ GLuint shader_program;
 GLuint pos_buffer_obj;
 GLuint zoom_uniform;
 GLuint offsetUniform;
+GLuint transformMatUnif;
 float zoom = 1.0f;
 struct {
     float x;
     float y;
 } translate_offset = {0, 0};
+float rot_angle = 0;
 
 void draw(void) {
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -72,6 +78,18 @@ void draw(void) {
     glUseProgram(shader_program);
     glUniform1f(zoom_uniform, zoom);
     glUniform2f(offsetUniform, translate_offset.x, translate_offset.y);
+    float transformMat[16] = {0.0f};
+    float angle = rot_angle * (M_PI / 180);
+    transformMat[0] = cos(angle);
+    transformMat[8] = sin(angle);
+
+    transformMat[5] = 1;
+
+    transformMat[2] = -sin(angle);
+    transformMat[10] = cos(angle);
+
+    transformMat[15] = 1;
+    glUniformMatrix4fv(transformMatUnif, 1, GL_FALSE, transformMat);
 
     glBindBuffer(GL_ARRAY_BUFFER, pos_buffer_obj);
 
@@ -94,14 +112,23 @@ void draw(void) {
 
 void handle_key(unsigned char key, int x, int y) {
     // ctrl+q sends 17
-    if (key == 17 && glutGetModifiers() == GLUT_ACTIVE_CTRL)
-        glutLeaveMainLoop();
+    if (key == 17 && glutGetModifiers() == GLUT_ACTIVE_CTRL) {
+        return glutLeaveMainLoop();
+    }
+    switch (key) {
+        case 'e':
+            rot_angle += 1.0f;
+            break;
+        case 'r':
+            rot_angle -= 1.0f;
+            break;
+    }
 }
 
 void handle_special(int key, int x, int y) {
     const float step = 0.025f;
 
-    switch(key) {
+    switch (key) {
         case GLUT_KEY_HOME:
             zoom += step;
             break;
@@ -222,6 +249,7 @@ int main(int argc, char **argv) {
 
     offsetUniform = glGetUniformLocation(shader_program, "offset");
     perspectiveMatrixUnif = glGetUniformLocation(shader_program, "perspectiveMatrix");
+    transformMatUnif = glGetUniformLocation(shader_program, "transform");
     zoom_uniform = glGetUniformLocation(shader_program, "zoom");
 
     float fFrustumScale = 1.0f; float fzNear = 0.5f; float fzFar = 3.0f;
