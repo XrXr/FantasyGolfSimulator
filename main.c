@@ -6,6 +6,8 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
+#define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
+
 const float g_vertex_buffer_data[] = {
     0.0f, 0.0f, 0.0f, 1.0f,
     0.0f, 0.0f, -1.0f, 1.0f,
@@ -105,7 +107,6 @@ vec3 calc_lookat(const vec3 eye, const float rot_deg) {
     const float rot_rad = rot_deg * (M_PI / 180);
     const float cos_a = cos(rot_rad);
     const float sin_a = sin(rot_rad);
-    const float diff = (cos_a - sin_a);
     const vec3 result = {
         sin_a,
         0,
@@ -173,10 +174,12 @@ mat4 rotate(float angle, vec3 axis) {
     ret.value[9] = (-axis.x) * s + yz * c_comp;
     ret.value[10] = c + (axis.z * axis.z * c_comp);
 
-
-
     ret.value[15] = 1;
     return ret;
+}
+
+float dot3(const vec3 a, const vec3 b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
 void draw(void) {
@@ -208,15 +211,16 @@ void draw(void) {
     glUniformMatrix4fv(rotateTransUni, 1, GL_FALSE, transformMat);
 
     // recover the lookat vector
-    //vec3 lookat = calc_lookat(translate_offset, y_rot_angle);
     vec3 lookat = {0, 0, -1};
+    //print_vec3(lookat);
     vec3 up = {0, 1, 0};
     vec3 up_down_axis = cross(lookat, up);
-    //printf("x=%f y=%f z=%f\n", up_down_axis.x, up_down_axis.y, up_down_axis.z);
+
+    print_vec3(up_down_axis);
     // rotate around that axis
-    angle = x_rot_angle * (M_PI / 180);
+    //angle = x_rot_angle * (M_PI / 180);
     //printf("xrotangle=%f\n", x_rot_angle);
-    mat4 x_rot_mat = rotate(angle, normalize3(up_down_axis));
+    mat4 x_rot_mat = rotate(x_rot_angle, normalize3(up_down_axis));
     glUniformMatrix4fv(xRotateTransUni, 1, GL_FALSE, x_rot_mat.value);
 
     glBindBuffer(GL_ARRAY_BUFFER, pos_buffer_obj);
@@ -225,7 +229,7 @@ void draw(void) {
     glEnableVertexAttribArray(1);
 
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-    // // the color. 64 = sizeof(float) * 4 dimension * 8 of them
+    // the color. 64 = sizeof(float) * 4 dimension * 8 of them
     glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(g_vertex_buffer_data) / 2));
 
     glDrawArrays(GL_TRIANGLE_FAN, 0, 8);
@@ -286,15 +290,20 @@ int screen_height;
 void mouse_movement(int x, int y) {
     if (lx != 0 || ly != 0) {
         y_rot_angle += (float)(x - lx) / (float)(screen_width) * 365;
-        x_rot_angle += (float)(y - ly) * 20;
+        x_rot_angle += (float)(y - ly) / (float)(screen_height) * 365;
     }
 
     lx = x;
     ly = y;
 }
 
-void changeSize(int w, int h) {
+void handle_mouse_entry(int state) {
+    lx = ly = 0;
+}
+
+void handle_window_size_change(int w, int h) {
     glViewport(0, 0, w, h);
+    lx = ly = 0;
 }
 
 GLuint compile_shader(GLenum eShaderType, const char* shader_source) {
@@ -372,8 +381,9 @@ int main(int argc, char **argv) {
     glutInitDisplayMode(GLUT_RGBA|GLUT_SINGLE|GLUT_MULTISAMPLE);
     glutDisplayFunc(draw);
     //glutIdleFunc(draw);
-    glutReshapeFunc(changeSize);
+    glutReshapeFunc(handle_window_size_change);
     glutKeyboardFunc(handle_key);
+    glutEntryFunc(handle_mouse_entry);
     glutSpecialFunc(handle_special);
 
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_shader);
@@ -400,7 +410,7 @@ int main(int argc, char **argv) {
     worldTransUni = glGetUniformLocation(shader_program, "world_trans");
     zoom_uniform = glGetUniformLocation(shader_program, "zoom");
 
-    float fFrustumScale = 1.0f; float fzNear = 0.025f; float fzFar = 10.0f;
+    float fFrustumScale = 2.0f; float fzNear = 0.025f; float fzFar = 10.0f;
 
     float theMatrix[16];
     memset(theMatrix, 0, sizeof(float) * 16);
