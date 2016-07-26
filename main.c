@@ -89,7 +89,7 @@ typedef struct {
 } mat4;
 
 float zoom = 1.0f;
-vec3 translate_offset = {0, 0, 1.0f};
+vec3 camera_pos = {0, 0, 1.0f};
 float y_rot_angle = 0;
 float x_rot_angle = 0;
 
@@ -103,13 +103,14 @@ vec3 normalize3(const vec3 v) {
     return ret;
 };
 
-vec3 calc_lookat(const vec3 eye, const float rot_deg) {
-    const float rot_rad = rot_deg * (M_PI / 180);
+vec3 calc_lookat(const vec3 eye, const float y_rotate, const float x_rotate) {
+    const float rot_rad = y_rotate * (M_PI / 180);
+    const float x_roate_rad = x_rotate * (M_PI / 180);
     const float cos_a = cos(rot_rad);
     const float sin_a = sin(rot_rad);
     const vec3 result = {
         sin_a,
-        0,
+        -sin(x_roate_rad),
         -cos_a
     };
 
@@ -195,9 +196,9 @@ void draw(void) {
     worldMat[10] = 1;
     worldMat[15] = 1;
 
-    worldMat[12] = -translate_offset.x;
-    worldMat[13] = -translate_offset.y;
-    worldMat[14] = -translate_offset.z;
+    worldMat[12] = -camera_pos.x;
+    worldMat[13] = -camera_pos.y;
+    worldMat[14] = -camera_pos.z;
     glUniformMatrix4fv(worldTransUni, 1, GL_FALSE, worldMat);
 
     float transformMat[16] = {0};
@@ -251,44 +252,63 @@ void draw(void) {
     glutPostRedisplay();
 }
 
+void camera_pan(vec3* look, float factor) {
+    // unique 2d perpendicular vector
+    camera_pos.x -= look->z * factor;
+    camera_pos.z += look->x * factor;
+}
+
+void camera_move_in(vec3* look, float factor) {
+    camera_pos.x += look->x * factor;
+    camera_pos.y += look->y * factor;
+    camera_pos.z += look->z * factor;
+}
+
+const float CAMERA_STEP = 0.025f;
+
 void handle_key(unsigned char key, int x, int y) {
     // ctrl+q sends 17
     if (key == 17 && glutGetModifiers() == GLUT_ACTIVE_CTRL) {
         return glutLeaveMainLoop();
     }
+    vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
     switch (key) {
         case 'e':
-            y_rot_angle += 1.0f;
+            camera_pos.y += CAMERA_STEP;
             break;
-        case 'r':
-            y_rot_angle -= 1.0f;
+        case 'q':
+            camera_pos.y -= CAMERA_STEP;
+            break;
+        case 'a':
+            camera_pan(&look, -CAMERA_STEP);
+            break;
+        case 'd':
+            camera_pan(&look, CAMERA_STEP);
+            break;
+        case 'w':
+            camera_move_in(&look, CAMERA_STEP);
+            break;
+        case 's':
+            camera_move_in(&look, -CAMERA_STEP);
             break;
     }
 }
 
 void handle_special(int key, int x, int y) {
-    const float step = 0.025f;
+    vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
 
     switch (key) {
-        case GLUT_KEY_HOME:
-            translate_offset.z -= step;
-            // zoom += step;
-            break;
-        case GLUT_KEY_END:
-            translate_offset.z += step;
-            // zoom = fmax(0, zoom - step);
-            break;
         case GLUT_KEY_LEFT:
-            translate_offset.x -= step;
+            camera_pan(&look, -CAMERA_STEP);
             break;
         case GLUT_KEY_RIGHT:
-            translate_offset.x += step;
+            camera_pan(&look, CAMERA_STEP);
             break;
         case GLUT_KEY_UP:
-            translate_offset.y += step;
+            camera_move_in(&look, CAMERA_STEP);
             break;
         case GLUT_KEY_DOWN:
-            translate_offset.y -= step;
+            camera_move_in(&look, -CAMERA_STEP);
             break;
     }
 }
