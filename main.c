@@ -216,12 +216,21 @@ void draw(void) {
     vec3 up = {0, 1, 0};
     vec3 up_down_axis = cross(lookat, up);
 
-    print_vec3(up_down_axis);
+    //print_vec3(up_down_axis);
     // rotate around that axis
-    //angle = x_rot_angle * (M_PI / 180);
     //printf("xrotangle=%f\n", x_rot_angle);
-    mat4 x_rot_mat = rotate(x_rot_angle, normalize3(up_down_axis));
-    glUniformMatrix4fv(xRotateTransUni, 1, GL_FALSE, x_rot_mat.value);
+    //mat4 x_rot_mat = rotate(x_rot_angle, normalize3(up_down_axis));
+
+    float x_rot[16] = {0};
+    angle = x_rot_angle * (M_PI / 180);
+    x_rot[0] = 1;
+    x_rot[5] = cos(angle);
+    x_rot[6] = sin(angle);
+    x_rot[9] = -sin(angle);
+    x_rot[10] = cos(angle);
+    x_rot[15] = 1;
+
+    glUniformMatrix4fv(xRotateTransUni, 1, GL_FALSE, x_rot);
 
     glBindBuffer(GL_ARRAY_BUFFER, pos_buffer_obj);
 
