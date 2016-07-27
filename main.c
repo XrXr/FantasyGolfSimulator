@@ -5,6 +5,8 @@
 #include <string.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
+#include <stdbool.h>
+#include "clock.h"
 
 #define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
 
@@ -88,10 +90,18 @@ typedef struct {
     float value[16];
 } mat4;
 
+void camera_pan(vec3* look, float factor);
+void camera_move_in(vec3* look, float factor);
+void camera_y_translate(float factor);
+
 float zoom = 1.0f;
 vec3 camera_pos = {0, 0, 1.0f};
+bool key_buf[256];
+struct { bool up, down, left, right; } arrow_key;
 float y_rot_angle = 0;
 float x_rot_angle = 0;
+uint64_t last_sim_stamp = 0;
+const float CAMERA_STEP = 0.25f;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -184,6 +194,32 @@ float dot3(const vec3 a, const vec3 b) {
 }
 
 void draw(void) {
+    // sim
+    uint64_t t;
+    int ret = elapsed_ns(&t);
+    const uint64_t since_last = t - last_sim_stamp;
+    const float step = CAMERA_STEP * (since_last / 1000000000.0f);
+    last_sim_stamp = t;
+    vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
+
+    int in_out_dir = 0;
+    int pan_dir = 0;
+    int y_translate_dir = 0;
+
+    pan_dir += (key_buf['a'] || arrow_key.left) * -1;
+    pan_dir += (key_buf['d'] || arrow_key.right);
+
+    in_out_dir += (key_buf['s'] || arrow_key.down) * -1;
+    in_out_dir += (key_buf['w'] || arrow_key.up);
+
+    y_translate_dir += key_buf['q'] * -1;
+    y_translate_dir += key_buf['e'];
+
+    camera_pan(&look, pan_dir * step);
+    camera_move_in(&look, in_out_dir * step);
+    camera_y_translate(y_translate_dir * step);
+    // sim end
+
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -252,6 +288,16 @@ void draw(void) {
     glutPostRedisplay();
 }
 
+int previous_time = 0;
+void idle(void) {
+    int current_time = glutGet(GLUT_ELAPSED_TIME);
+    int frame_time = current_time - previous_time;
+    if (frame_time == 0) return;
+    previous_time = current_time;
+
+    printf("%2.2f\r", 1000.0f / (float)(frame_time));
+}
+
 void camera_pan(vec3* look, float factor) {
     // unique 2d perpendicular vector
     camera_pos.x -= look->z * factor;
@@ -264,54 +310,47 @@ void camera_move_in(vec3* look, float factor) {
     camera_pos.z += look->z * factor;
 }
 
-const float CAMERA_STEP = 0.025f;
+void camera_y_translate(float factor) {
+    camera_pos.y += factor;
+}
 
 void handle_key(unsigned char key, int x, int y) {
     // ctrl+q sends 17
     if (key == 17 && glutGetModifiers() == GLUT_ACTIVE_CTRL) {
         return glutLeaveMainLoop();
     }
-    vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
+    key_buf[key] = true;
+}
+
+void handle_key_release(unsigned char key, int x, int y) {
+    key_buf[key] = false;
+}
+
+void set_arrow_key_state(const int key, const bool set_to) {
     switch (key) {
-        case 'e':
-            camera_pos.y += CAMERA_STEP;
+        case GLUT_KEY_LEFT:
+            arrow_key.left = set_to;
             break;
-        case 'q':
-            camera_pos.y -= CAMERA_STEP;
+        case GLUT_KEY_RIGHT:
+            arrow_key.right = set_to;
             break;
-        case 'a':
-            camera_pan(&look, -CAMERA_STEP);
+        case GLUT_KEY_UP:
+            arrow_key.up = set_to;
             break;
-        case 'd':
-            camera_pan(&look, CAMERA_STEP);
-            break;
-        case 'w':
-            camera_move_in(&look, CAMERA_STEP);
-            break;
-        case 's':
-            camera_move_in(&look, -CAMERA_STEP);
+        case GLUT_KEY_DOWN:
+            arrow_key.down = set_to;
             break;
     }
 }
 
 void handle_special(int key, int x, int y) {
-    vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
-
-    switch (key) {
-        case GLUT_KEY_LEFT:
-            camera_pan(&look, -CAMERA_STEP);
-            break;
-        case GLUT_KEY_RIGHT:
-            camera_pan(&look, CAMERA_STEP);
-            break;
-        case GLUT_KEY_UP:
-            camera_move_in(&look, CAMERA_STEP);
-            break;
-        case GLUT_KEY_DOWN:
-            camera_move_in(&look, -CAMERA_STEP);
-            break;
-    }
+    set_arrow_key_state(key, true);
 }
+
+void handle_special_release(int key, int x, int y) {
+    set_arrow_key_state(key, false);
+}
+
 
 int lx = 0, ly = 0;
 int screen_width;
@@ -409,11 +448,13 @@ int main(int argc, char **argv) {
 
     glutInitDisplayMode(GLUT_RGBA|GLUT_SINGLE|GLUT_MULTISAMPLE);
     glutDisplayFunc(draw);
-    //glutIdleFunc(draw);
+    //glutIdleFunc(idle);
     glutReshapeFunc(handle_window_size_change);
     glutKeyboardFunc(handle_key);
+    glutKeyboardUpFunc(handle_key_release);
     glutEntryFunc(handle_mouse_entry);
     glutSpecialFunc(handle_special);
+    glutSpecialUpFunc(handle_special_release);
 
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_shader);
     GLuint fs = compile_shader(GL_FRAGMENT_SHADER, frag_shader);
