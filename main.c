@@ -6,6 +6,13 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdbool.h>
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+#define TINYOBJ_LOADER_C_IMPLEMENTATION
+#include "tinyobj_loader_c.h"
 #include "clock.h"
 
 #define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
@@ -35,11 +42,10 @@ const float g_vertex_buffer_data[] = {
 const char* vertex_shader =
 "#version 330\n"
 
-"layout(location = 0) in vec4 position;"
-"layout(location = 1) in vec4 in_color;"
-"flat out vec4 vertex_color;"
+"layout(location = 0) in vec3 position;"
+//"layout(location = 1) in vec4 in_color;"
+"out vec4 vertex_color;"
 
-"uniform vec2 offset;"
 "uniform mat4 perspectiveMatrix;"
 "uniform mat4 world_trans;" // camera magic happens here
 "uniform mat4 rotate_trans;"
@@ -48,18 +54,18 @@ const char* vertex_shader =
 
 "void main()"
 "{"
-"    vec4 pos = world_trans * position;"
+"    vec4 pos = world_trans * vec4(position, 1);"
 "    pos = rotate_trans * pos;"
 "    pos = x_rotate_trans * pos;"
 "    gl_Position = perspectiveMatrix * pos;"
-"    vertex_color = in_color;"
+"    vertex_color = vec4(position, 1);"
 "}";
 
 const char* frag_shader =
 "#version 330\n"
 
 "out vec4 output_color;"
-"flat in vec4 vertex_color;"
+"in vec4 vertex_color;"
 "void main()"
 "{"
 "   output_color = vertex_color;"
@@ -67,11 +73,13 @@ const char* frag_shader =
 
 GLuint shader_program;
 GLuint pos_buffer_obj;
+GLuint mesh_buffer;
 GLuint zoom_uniform;
 GLuint offsetUniform;
 GLuint rotateTransUni;
 GLuint xRotateTransUni;
 GLuint worldTransUni;
+GLuint perspectiveMatrixUnif;
 
 typedef struct {
     float x;
@@ -101,7 +109,10 @@ struct { bool up, down, left, right; } arrow_key;
 float y_rot_angle = 0;
 float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
+float perspectiveMatrix[16];
+const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10.0f;
 const float CAMERA_STEP = 0.25f;
+size_t sphere_triangle_count;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -269,16 +280,18 @@ void draw(void) {
 
     glUniformMatrix4fv(xRotateTransUni, 1, GL_FALSE, x_rot);
 
-    glBindBuffer(GL_ARRAY_BUFFER, pos_buffer_obj);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
 
     glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
+    //glEnableVertexAttribArray(1);
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-    // the color. 64 = sizeof(float) * 4 dimension * 8 of them
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(g_vertex_buffer_data) / 2));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    // // the color. 64 = sizeof(float) * 4 dimension * 8 of them
+    // glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(g_vertex_buffer_data) / 2));
 
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 8);
+    glDrawArrays(GL_TRIANGLES, 0, sphere_triangle_count);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
@@ -370,6 +383,12 @@ void handle_mouse_entry(int state) {
 }
 
 void handle_window_size_change(int w, int h) {
+    perspectiveMatrix[0] = fFrustumScale / (w / (float)h);
+    perspectiveMatrix[5] = fFrustumScale;
+
+    glUseProgram(shader_program);
+    glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, perspectiveMatrix);
+    glUseProgram(0);
     glViewport(0, 0, w, h);
     lx = ly = 0;
 }
@@ -430,6 +449,20 @@ GLuint make_shader_program(int n, ...) {
     return program;
 }
 
+// TODO: embed the mesh into the binary
+char* read_obj(const char* file_name, size_t* buf_len) {
+    int fd = open(file_name, O_RDONLY);
+    struct stat sd;
+
+    fstat(fd, &sd);
+    *buf_len = sd.st_size + 1;
+    char* buf = malloc(sd.st_size + 1);
+    read(fd, buf, sd.st_size);
+    buf[sd.st_size] = 0;
+    close(fd);
+    return buf;
+}
+
 int main(int argc, char **argv) {
     glutInitContextVersion(3, 3);
     glewExperimental = GL_TRUE;
@@ -471,8 +504,6 @@ int main(int argc, char **argv) {
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
 
-    GLuint perspectiveMatrixUnif;
-
     offsetUniform = glGetUniformLocation(shader_program, "offset");
     perspectiveMatrixUnif = glGetUniformLocation(shader_program, "perspectiveMatrix");
     rotateTransUni = glGetUniformLocation(shader_program, "rotate_trans");
@@ -480,16 +511,11 @@ int main(int argc, char **argv) {
     worldTransUni = glGetUniformLocation(shader_program, "world_trans");
     zoom_uniform = glGetUniformLocation(shader_program, "zoom");
 
-    float fFrustumScale = 2.0f; float fzNear = 0.025f; float fzFar = 10.0f;
-
-    float theMatrix[16];
-    memset(theMatrix, 0, sizeof(float) * 16);
-
-    theMatrix[0] = fFrustumScale;
-    theMatrix[5] = fFrustumScale;
-    theMatrix[10] = (fzFar + fzNear) / (fzNear - fzFar);
-    theMatrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
-    theMatrix[11] = -1.0f;
+    perspectiveMatrix[0] = fFrustumScale;
+    perspectiveMatrix[5] = fFrustumScale;
+    perspectiveMatrix[10] = (fzFar + fzNear) / (fzNear - fzFar);
+    perspectiveMatrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
+    perspectiveMatrix[11] = -1.0f;
 
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
@@ -497,9 +523,69 @@ int main(int argc, char **argv) {
 
     glUseProgram(shader_program);
     glUniform2f(offsetUniform, 0.0f, 0.0f);
-    glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, theMatrix);
+    glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, perspectiveMatrix);
     glUniform1f(zoom_uniform, 100.0f);
     glUseProgram(0);
+
+    size_t filesize;
+    char* buf = read_obj("golf_ball.obj", &filesize);
+
+    tinyobj_attrib_t attrib;
+    tinyobj_shape_t* shapes;
+    tinyobj_material_t* materials;
+    size_t nshape, nmat;
+    tinyobj_parse_obj(&attrib, &shapes, &nshape, &materials, &nmat, buf, filesize,
+                      TINYOBJ_FLAG_TRIANGULATE);
+
+
+
+    glGenBuffers(1, &mesh_buffer);
+    sphere_triangle_count = attrib.num_face_num_verts * 3 * 3;
+    const size_t mesh_size = attrib.num_face_num_verts * sizeof(float) * 3 * 3;
+    float* mesh = malloc(mesh_size);
+//    printf("%s\n", buf);
+
+    size_t mesh_offset = 0;
+    size_t face_offset = 0;
+    for (size_t i = 0; i < attrib.num_face_num_verts; i++) {
+        assert(attrib.face_num_verts[i] % 3 == 0); // all triangular faces
+        for (size_t f = 0; f < (size_t)attrib.face_num_verts[i]; f+=3) {
+            tinyobj_vertex_index_t idx0 = attrib.faces[face_offset + 3 * f + 0];
+            tinyobj_vertex_index_t idx1 = attrib.faces[face_offset + 3 * f + 1];
+            tinyobj_vertex_index_t idx2 = attrib.faces[face_offset + 3 * f + 2];
+
+            for (int k = 0; k < 3; k++) {
+                int f0 = idx0.v_idx;
+                int f1 = idx1.v_idx;
+                int f2 = idx2.v_idx;
+
+                mesh[mesh_offset + 0 + k] = attrib.vertices[3 * (size_t)f0 + k];
+                mesh[mesh_offset + 3 + k] = attrib.vertices[3 * (size_t)f1 + k];
+                mesh[mesh_offset + 6 + k] = attrib.vertices[3 * (size_t)f2 + k];
+            }
+
+            mesh_offset += 9;
+        }
+        face_offset += (size_t)attrib.face_num_verts[i];
+    }
+
+    tinyobj_attrib_free(&attrib);
+    tinyobj_shapes_free(shapes, nshape);
+    tinyobj_materials_free(materials, nmat);
+
+    // for (int i = 0; i < attrib.num_face_num_verts; i++) {
+    //     for (int j = 0; j < 3; j++) {
+    //         printf("x=%f y=%f z%f\n", mesh[i * 9 + j * 3 + 0], mesh[i * 9 + j * 3 + 1], mesh[i * 9 + j * 3 + 2]);
+    //     }
+    // }
+
+    // printf("%d\n", sphere_triangle_count);
+
+
+    glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
+    glBufferData(GL_ARRAY_BUFFER, mesh_size, mesh, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    free(mesh);
 
  //   glutFullScreen();
     glutMainLoop();
