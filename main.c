@@ -47,16 +47,12 @@ const char* vertex_shader =
 "out vec4 vertex_color;"
 
 "uniform mat4 perspectiveMatrix;"
-"uniform mat4 world_trans;" // camera magic happens here
-"uniform mat4 rotate_trans;"
-"uniform mat4 x_rotate_trans;"
+"uniform mat4 camera_trans;"
 "uniform float zoom;"
 
 "void main()"
 "{"
-"    vec4 pos = world_trans * vec4(position, 1);"
-"    pos = rotate_trans * pos;"
-"    pos = x_rotate_trans * pos;"
+"    vec4 pos = camera_trans * vec4(position, 1);"
 "    gl_Position = perspectiveMatrix * pos;"
 "    vertex_color = vec4(position, 1);"
 "}";
@@ -112,7 +108,7 @@ uint64_t last_sim_stamp = 0;
 float perspectiveMatrix[16];
 const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10.0f;
 const float CAMERA_STEP = 0.25f;
-size_t sphere_triangle_count;
+size_t golf_mesh_vert_count;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -148,12 +144,14 @@ vec3 cross(const vec3 a, const vec3 b) {
 }
 
 void matrix_mul_2(float (*a)[16], float (*b)[16], float (*out)[16]) {
+    memset(*out, 0, sizeof(*out));
     for (int row = 0; row < 4; row++) {
         float* a_base = (*a) + row;
         for (int col = 0; col < 4; col++) {
-            float* b_base = (*b) + 4 * col;
+            float* b_base = (*b) + (4 * col);
+            const size_t out_offset = col * 4 + row;
             for (int i = 0; i < 4; i++) {
-                (*out)[row * 4 + col] += a_base[i * 4] + b_base[i];
+                (*out)[out_offset] += a_base[i * 4] * b_base[i];
             }
         }
     }
@@ -165,7 +163,7 @@ void matrix_mul(float (**in)[16], size_t size, float (*out)[16]) {
     float cur[16];
     float tmp[16];
     matrix_mul_2(in[0], in[1], &cur);
-    for (size_t i = 0; i < size; i++) {
+    for (size_t i = 2; i < size; i++) {
         matrix_mul_2(&cur, in[i], &tmp);
         memcpy(cur, tmp, sizeof(cur));
     }
@@ -237,48 +235,40 @@ void draw(void) {
     glUseProgram(shader_program);
     glUniform1f(zoom_uniform, zoom);
 
-    float worldMat[16] = {0};
-    worldMat[0] = 1;
-    worldMat[5] = 1;
-    worldMat[10] = 1;
-    worldMat[15] = 1;
+    {  // compute and send the camera transform matrix
+        float c_translate[16] = {0};
+        c_translate[0] = 1;
+        c_translate[5] = 1;
+        c_translate[10] = 1;
+        c_translate[15] = 1;
 
-    worldMat[12] = -camera_pos.x;
-    worldMat[13] = -camera_pos.y;
-    worldMat[14] = -camera_pos.z;
-    glUniformMatrix4fv(worldTransUni, 1, GL_FALSE, worldMat);
+        c_translate[12] = -camera_pos.x;
+        c_translate[13] = -camera_pos.y;
+        c_translate[14] = -camera_pos.z;
 
-    float transformMat[16] = {0};
-    float angle = y_rot_angle * (M_PI / 180);
-    transformMat[0] = cos(angle);
-    transformMat[2] = -sin(angle);
-    transformMat[5] = 1;
-    transformMat[8] = sin(angle);
-    transformMat[10] = cos(angle);
-    transformMat[15] = 1;
-    glUniformMatrix4fv(rotateTransUni, 1, GL_FALSE, transformMat);
+        float c_y_rot[16] = {0};
+        float angle = y_rot_angle * (M_PI / 180);
+        c_y_rot[0] = cos(angle);
+        c_y_rot[2] = -sin(angle);
+        c_y_rot[5] = 1;
+        c_y_rot[8] = sin(angle);
+        c_y_rot[10] = cos(angle);
+        c_y_rot[15] = 1;
 
-    // recover the lookat vector
-    vec3 lookat = {0, 0, -1};
-    //print_vec3(lookat);
-    vec3 up = {0, 1, 0};
-    vec3 up_down_axis = cross(lookat, up);
+        float c_x_rot[16] = {0};
+        angle = x_rot_angle * (M_PI / 180);
+        c_x_rot[0] = 1;
+        c_x_rot[5] = cos(angle);
+        c_x_rot[6] = sin(angle);
+        c_x_rot[9] = -sin(angle);
+        c_x_rot[10] = cos(angle);
+        c_x_rot[15] = 1;
 
-    //print_vec3(up_down_axis);
-    // rotate around that axis
-    //printf("xrotangle=%f\n", x_rot_angle);
-    //mat4 x_rot_mat = rotate(x_rot_angle, normalize3(up_down_axis));
-
-    float x_rot[16] = {0};
-    angle = x_rot_angle * (M_PI / 180);
-    x_rot[0] = 1;
-    x_rot[5] = cos(angle);
-    x_rot[6] = sin(angle);
-    x_rot[9] = -sin(angle);
-    x_rot[10] = cos(angle);
-    x_rot[15] = 1;
-
-    glUniformMatrix4fv(xRotateTransUni, 1, GL_FALSE, x_rot);
+        float (*(mult_buf)[3])[16] = {&c_x_rot, &c_y_rot, &c_translate};
+        float trans[16];
+        matrix_mul(mult_buf, 3, &trans);
+        glUniformMatrix4fv(worldTransUni, 1, GL_FALSE, trans);
+    }
 
     glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
 
@@ -289,7 +279,7 @@ void draw(void) {
     // // the color. 64 = sizeof(float) * 4 dimension * 8 of them
     // glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(g_vertex_buffer_data) / 2));
 
-    glDrawArrays(GL_TRIANGLES, 0, sphere_triangle_count);
+    glDrawArrays(GL_TRIANGLES, 0, golf_mesh_vert_count);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
@@ -508,7 +498,7 @@ int main(int argc, char **argv) {
     perspectiveMatrixUnif = glGetUniformLocation(shader_program, "perspectiveMatrix");
     rotateTransUni = glGetUniformLocation(shader_program, "rotate_trans");
     xRotateTransUni = glGetUniformLocation(shader_program, "x_rotate_trans");
-    worldTransUni = glGetUniformLocation(shader_program, "world_trans");
+    worldTransUni = glGetUniformLocation(shader_program, "camera_trans");
     zoom_uniform = glGetUniformLocation(shader_program, "zoom");
 
     perspectiveMatrix[0] = fFrustumScale;
@@ -540,10 +530,9 @@ int main(int argc, char **argv) {
 
 
     glGenBuffers(1, &mesh_buffer);
-    sphere_triangle_count = attrib.num_face_num_verts * 3 * 3;
+    golf_mesh_vert_count = attrib.num_face_num_verts * 3 * 3;
     const size_t mesh_size = attrib.num_face_num_verts * sizeof(float) * 3 * 3;
     float* mesh = malloc(mesh_size);
-//    printf("%s\n", buf);
 
     size_t mesh_offset = 0;
     size_t face_offset = 0;
@@ -579,7 +568,7 @@ int main(int argc, char **argv) {
     //     }
     // }
 
-    // printf("%d\n", sphere_triangle_count);
+    // printf("%d\n", golf_mesh_vert_count);
 
 
     glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
