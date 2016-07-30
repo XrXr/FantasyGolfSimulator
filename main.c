@@ -46,13 +46,14 @@ const char* vertex_shader =
 //"layout(location = 1) in vec4 in_color;"
 "out vec4 vertex_color;"
 
+"uniform mat4 model_to_world;"
 "uniform mat4 perspectiveMatrix;"
 "uniform mat4 camera_trans;"
 "uniform float zoom;"
 
 "void main()"
 "{"
-"    vec4 pos = camera_trans * vec4(position, 1);"
+"    vec4 pos = camera_trans * model_to_world * vec4(position, 1);"
 "    gl_Position = perspectiveMatrix * pos;"
 "    vertex_color = vec4(position, 1);"
 "}";
@@ -76,6 +77,7 @@ GLuint rotateTransUni;
 GLuint xRotateTransUni;
 GLuint worldTransUni;
 GLuint perspectiveMatrixUnif;
+GLuint model_to_world;
 
 typedef struct {
     float x;
@@ -98,15 +100,14 @@ void camera_pan(vec3* look, float factor);
 void camera_move_in(vec3* look, float factor);
 void camera_y_translate(float factor);
 
-float zoom = 1.0f;
-vec3 camera_pos = {0, 0, 1.0f};
+vec3 camera_pos = {0, 0, 2.0f};
 bool key_buf[256];
 struct { bool up, down, left, right; } arrow_key;
 float y_rot_angle = 0;
 float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
 float perspectiveMatrix[16];
-const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10.0f;
+const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 20.0f;
 const float CAMERA_STEP = 0.25f;
 size_t golf_mesh_vert_count;
 
@@ -201,7 +202,10 @@ mat4 rotate(float angle, vec3 axis) {
 float dot3(const vec3 a, const vec3 b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
-
+float flight_time = 0;
+bool flying = false;
+bool space_released_once = true;
+vec3 golf_ball_pos = {0};
 void draw(void) {
     // sim
     uint64_t t;
@@ -227,13 +231,40 @@ void draw(void) {
     camera_pan(&look, pan_dir * step);
     camera_move_in(&look, in_out_dir * step);
     camera_y_translate(y_translate_dir * step);
+
+
+    if (key_buf[' ']) {
+        if (flying) {
+            flying = !space_released_once;
+        } else {
+            flying = space_released_once;
+        }
+        space_released_once = false;
+    } else {
+        space_released_once = true;
+    }
+
+    if (flying) {
+        flight_time += since_last / 1000000000.0f;
+
+        golf_ball_pos.z = -flight_time;
+
+        const float first_term = flight_time - 4;
+        golf_ball_pos.y = -(first_term * first_term) + 16;
+
+        if (golf_ball_pos.y <= 0) {
+            golf_ball_pos.y = 0;
+            flying = false;
+            flight_time = 0;
+        }
+    }
+
     // sim end
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     glUseProgram(shader_program);
-    glUniform1f(zoom_uniform, zoom);
 
     {  // compute and send the camera transform matrix
         float c_translate[16] = {0};
@@ -268,6 +299,14 @@ void draw(void) {
         float trans[16];
         matrix_mul(mult_buf, 3, &trans);
         glUniformMatrix4fv(worldTransUni, 1, GL_FALSE, trans);
+    }
+
+    {
+        float model_world_trans[16] = {[0]=.2f, [5]=.2f, [10]=.2f, [15]=1};
+        model_world_trans[12] = golf_ball_pos.x;
+        model_world_trans[13] = golf_ball_pos.y;
+        model_world_trans[14] = golf_ball_pos.z;
+        glUniformMatrix4fv(model_to_world, 1, GL_FALSE, model_world_trans);
     }
 
     glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
@@ -499,7 +538,7 @@ int main(int argc, char **argv) {
     rotateTransUni = glGetUniformLocation(shader_program, "rotate_trans");
     xRotateTransUni = glGetUniformLocation(shader_program, "x_rotate_trans");
     worldTransUni = glGetUniformLocation(shader_program, "camera_trans");
-    zoom_uniform = glGetUniformLocation(shader_program, "zoom");
+    model_to_world = glGetUniformLocation(shader_program, "model_to_world");
 
     perspectiveMatrix[0] = fFrustumScale;
     perspectiveMatrix[5] = fFrustumScale;
