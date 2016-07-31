@@ -55,7 +55,12 @@ const char* vertex_shader =
 "{"
 "    vec4 pos = camera_trans * model_to_world * vec4(position, 1);"
 "    gl_Position = perspectiveMatrix * pos;"
-"    vertex_color = vec4(position, 1);"
+"    mat3 modelToCameraM = mat3(camera_trans * model_to_world);"
+"    vec3 normCamSpace = normalize(modelToCameraM * position);"
+"    float cosAngIncidence = dot(normCamSpace, position);"
+"    cosAngIncidence = clamp(cosAngIncidence, 0, 1);"
+"    float dist = length(position);"
+"    vertex_color = cosAngIncidence * (1/pow(((dist/5) + 1), 2)) *  vec4(1, 1, 1, 1);"
 "}";
 
 const char* frag_shader =
@@ -250,7 +255,7 @@ void draw(void) {
         golf_ball_pos.z = -flight_time;
 
         const float first_term = flight_time - 4;
-        golf_ball_pos.y = -(first_term * first_term) + 16;
+        golf_ball_pos.y = -(first_term * first_term) + 16 - flight_time  * flight_time * flight_time * flight_time;
 
         if (golf_ball_pos.y <= 0) {
             golf_ball_pos.y = 0;
