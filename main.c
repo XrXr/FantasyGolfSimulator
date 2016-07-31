@@ -49,7 +49,6 @@ const char* vertex_shader =
 "uniform mat4 model_to_world;"
 "uniform mat4 perspectiveMatrix;"
 "uniform mat4 camera_trans;"
-"uniform float zoom;"
 
 "void main()"
 "{"
@@ -76,7 +75,6 @@ const char* frag_shader =
 GLuint shader_program;
 GLuint pos_buffer_obj;
 GLuint mesh_buffer;
-GLuint zoom_uniform;
 GLuint offsetUniform;
 GLuint rotateTransUni;
 GLuint xRotateTransUni;
@@ -562,7 +560,6 @@ int main(int argc, char **argv) {
     glUseProgram(shader_program);
     glUniform2f(offsetUniform, 0.0f, 0.0f);
     glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, perspectiveMatrix);
-    glUniform1f(zoom_uniform, 100.0f);
     glUseProgram(0);
 
     size_t filesize;
