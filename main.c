@@ -112,8 +112,8 @@ float y_rot_angle = 0;
 float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
 float perspectiveMatrix[16];
-const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 20.0f;
-const float CAMERA_STEP = 0.25f;
+const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 1000.0f;
+const float CAMERA_STEP = 400.0f;
 size_t golf_mesh_vert_count;
 
 vec3 normalize3(const vec3 v) {
@@ -252,12 +252,16 @@ void draw(void) {
     if (flying) {
         flight_time += since_last / 1000000000.0f;
 
-        golf_ball_pos.z = -flight_time;
+        const float x = flight_time;
 
-        const float first_term = flight_time - 4;
-        golf_ball_pos.y = -(first_term * first_term) + 16 - flight_time  * flight_time * flight_time * flight_time;
+        golf_ball_pos.z = -((150 * x) - ((9 * x * x) / 2));
+        golf_ball_pos.y = (150 * x) - (3.255557 * x * x * x);
+
+        //printf("dist to ball %f\n", sqrt(golf_ball_pos.z * golf_ball_pos.z + golf_ball_pos.y * golf_ball_pos.y));
+        //printf("flight time %f, y %f\n", flight_time, golf_ball_pos.y);
 
         if (golf_ball_pos.y <= 0) {
+            printf("final z %f. flight time %f \n", golf_ball_pos.z, flight_time);
             golf_ball_pos.y = 0;
             flying = false;
             flight_time = 0;
