@@ -47,13 +47,13 @@ const char* vertex_shader =
 "out vec4 vertex_color;"
 
 "uniform mat4 model_to_world;"
-"uniform mat4 perspectiveMatrix;"
+"uniform mat4 pers_matrix;"
 "uniform mat4 camera_trans;"
 
 "void main()"
 "{"
 "    vec4 pos = camera_trans * model_to_world * vec4(position, 1);"
-"    gl_Position = perspectiveMatrix * pos;"
+"    gl_Position = pers_matrix * pos;"
 "    mat3 modelToCameraM = mat3(camera_trans * model_to_world);"
 "    vec3 normCamSpace = normalize(modelToCameraM * position);"
 "    float cosAngIncidence = dot(normCamSpace, position);"
@@ -67,19 +67,20 @@ const char* frag_shader =
 
 "out vec4 output_color;"
 "in vec4 vertex_color;"
+"uniform vec4 force_color;"
 "void main()"
 "{"
-"   output_color = vertex_color;"
+"   output_color = max(vertex_color, force_color);"
 "}";
 
 GLuint shader_program;
 GLuint pos_buffer_obj;
 GLuint mesh_buffer;
-GLuint offsetUniform;
+GLuint grid_buffer;
 GLuint rotateTransUni;
-GLuint xRotateTransUni;
-GLuint worldTransUni;
-GLuint perspectiveMatrixUnif;
+GLuint force_color_uni;
+GLuint camera_trans_uni;
+GLuint pers_matrix_uni;
 GLuint model_to_world;
 
 typedef struct {
@@ -103,15 +104,15 @@ void camera_pan(vec3* look, float factor);
 void camera_move_in(vec3* look, float factor);
 void camera_y_translate(float factor);
 
-vec3 camera_pos = {0, 0, 2.0f};
+vec3 camera_pos = {0, 3, 18};
 bool key_buf[256];
 struct { bool up, down, left, right; } arrow_key;
 float y_rot_angle = 0;
 float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
-float perspectiveMatrix[16];
+float pers_matrix[16];
 const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 1000.0f;
-const float CAMERA_STEP = 400.0f;
+const float CAMERA_STEP = 200.0f;
 size_t golf_mesh_vert_count;
 
 vec3 normalize3(const vec3 v) {
@@ -202,6 +203,14 @@ mat4 rotate(float angle, vec3 axis) {
     return ret;
 }
 
+static void check_errors(const char* desc) {
+    GLenum e = glGetError();
+    if (e != GL_NO_ERROR) {
+        fprintf(stderr, "OpenGL error in \"%s\": %d\n", desc, e);
+        exit(20);
+    }
+}
+
 float dot3(const vec3 a, const vec3 b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
@@ -234,7 +243,6 @@ void draw(void) {
     camera_pan(&look, pan_dir * step);
     camera_move_in(&look, in_out_dir * step);
     camera_y_translate(y_translate_dir * step);
-
 
     if (key_buf[' ']) {
         if (flying) {
@@ -305,32 +313,36 @@ void draw(void) {
         float (*(mult_buf)[3])[16] = {&c_x_rot, &c_y_rot, &c_translate};
         float trans[16];
         matrix_mul(mult_buf, 3, &trans);
-        glUniformMatrix4fv(worldTransUni, 1, GL_FALSE, trans);
+        glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, trans);
     }
 
     {
-        float model_world_trans[16] = {[0]=.2f, [5]=.2f, [10]=.2f, [15]=1};
-        model_world_trans[12] = golf_ball_pos.x;
-        model_world_trans[13] = golf_ball_pos.y;
-        model_world_trans[14] = golf_ball_pos.z;
-        glUniformMatrix4fv(model_to_world, 1, GL_FALSE, model_world_trans);
+        float mesh_model_trans[16] = {[0]=.2f, [5]=.2f, [10]=.2f, [15]=1};
+        mesh_model_trans[12] = golf_ball_pos.x;
+        mesh_model_trans[13] = golf_ball_pos.y;
+        mesh_model_trans[14] = golf_ball_pos.z;
+        glUniformMatrix4fv(model_to_world, 1, GL_FALSE, mesh_model_trans);
     }
 
+    glUniform4f(force_color_uni, 0, 0, 0, 0);
+
     glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
-
     glEnableVertexAttribArray(0);
-    //glEnableVertexAttribArray(1);
-
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    // // the color. 64 = sizeof(float) * 4 dimension * 8 of them
-    // glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(g_vertex_buffer_data) / 2));
-
     glDrawArrays(GL_TRIANGLES, 0, golf_mesh_vert_count);
-
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+    check_errors("draw mesh");
+
+    float id[16] = {[0]=1, [5]=1, [10]=1, [15]=1};
+    glUniformMatrix4fv(model_to_world, 1, GL_FALSE, id);
+    glUniform4f(force_color_uni, 1, 1, 1, 1);  // the grid's color
+    glBindBuffer(GL_ARRAY_BUFFER, grid_buffer);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glDrawArrays(GL_LINES, 0, 400);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    check_errors("draw grid");
 
     glDisableVertexAttribArray(0);
-    glDisableVertexAttribArray(1);
     glUseProgram(0);
 
     glutSwapBuffers();
@@ -419,18 +431,18 @@ void handle_mouse_entry(int state) {
 }
 
 void handle_window_size_change(int w, int h) {
-    perspectiveMatrix[0] = fFrustumScale / (w / (float)h);
-    perspectiveMatrix[5] = fFrustumScale;
+    pers_matrix[0] = fFrustumScale / (w / (float)h);
+    pers_matrix[5] = fFrustumScale;
 
     glUseProgram(shader_program);
-    glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, perspectiveMatrix);
+    glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
     glUseProgram(0);
     glViewport(0, 0, w, h);
     lx = ly = 0;
 }
 
-GLuint compile_shader(GLenum eShaderType, const char* shader_source) {
-    GLuint shader = glCreateShader(eShaderType);
+GLuint compile_shader(GLenum shader_type, const char* shader_source) {
+    GLuint shader = glCreateShader(shader_type);
     glShaderSource(shader, 1, &shader_source, NULL);
 
     glCompileShader(shader);
@@ -477,7 +489,9 @@ GLuint make_shader_program(int n, ...) {
     }
 
     for (i = 0; i < n; i++)
-        glDetachShader(program, va_arg(vl, GLuint));
+        glDetachShader(program, va_arg(vl_detach, GLuint));
+
+    check_errors("make_shader_program");
 
     va_end(vl);
     va_end(vl_detach);
@@ -514,6 +528,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Error: %s\n", glewGetErrorString(err));
         return 1;
     }
+    glGetError();
 
     glutInitDisplayMode(GLUT_RGBA|GLUT_SINGLE|GLUT_MULTISAMPLE);
     glutDisplayFunc(draw);
@@ -540,26 +555,23 @@ int main(int argc, char **argv) {
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
 
-    offsetUniform = glGetUniformLocation(shader_program, "offset");
-    perspectiveMatrixUnif = glGetUniformLocation(shader_program, "perspectiveMatrix");
-    rotateTransUni = glGetUniformLocation(shader_program, "rotate_trans");
-    xRotateTransUni = glGetUniformLocation(shader_program, "x_rotate_trans");
-    worldTransUni = glGetUniformLocation(shader_program, "camera_trans");
+    pers_matrix_uni = glGetUniformLocation(shader_program, "pers_matrix");
+    camera_trans_uni = glGetUniformLocation(shader_program, "camera_trans");
     model_to_world = glGetUniformLocation(shader_program, "model_to_world");
+    force_color_uni = glGetUniformLocation(shader_program, "force_color");
 
-    perspectiveMatrix[0] = fFrustumScale;
-    perspectiveMatrix[5] = fFrustumScale;
-    perspectiveMatrix[10] = (fzFar + fzNear) / (fzNear - fzFar);
-    perspectiveMatrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
-    perspectiveMatrix[11] = -1.0f;
+    pers_matrix[0] = fFrustumScale;
+    pers_matrix[5] = fFrustumScale;
+    pers_matrix[10] = (fzFar + fzNear) / (fzNear - fzFar);
+    pers_matrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
+    pers_matrix[11] = -1.0f;
 
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     glFrontFace(GL_CW);
 
     glUseProgram(shader_program);
-    glUniform2f(offsetUniform, 0.0f, 0.0f);
-    glUniformMatrix4fv(perspectiveMatrixUnif, 1, GL_FALSE, perspectiveMatrix);
+    glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
     glUseProgram(0);
 
     size_t filesize;
@@ -569,10 +581,8 @@ int main(int argc, char **argv) {
     tinyobj_shape_t* shapes;
     tinyobj_material_t* materials;
     size_t nshape, nmat;
-    tinyobj_parse_obj(&attrib, &shapes, &nshape, &materials, &nmat, buf, filesize,
-                      TINYOBJ_FLAG_TRIANGULATE);
-
-
+    tinyobj_parse_obj(&attrib, &shapes, &nshape, &materials, &nmat,
+                      buf, filesize, TINYOBJ_FLAG_TRIANGULATE);
 
     glGenBuffers(1, &mesh_buffer);
     golf_mesh_vert_count = attrib.num_face_num_verts * 3 * 3;
@@ -615,11 +625,24 @@ int main(int argc, char **argv) {
 
     // printf("%d\n", golf_mesh_vert_count);
 
-
     glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
     glBufferData(GL_ARRAY_BUFFER, mesh_size, mesh, GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     free(mesh);
+
+    // make the grid
+    glGenBuffers(1, &grid_buffer);
+    vec3 gird_points[100 * 4];
+    size_t cur = 0;
+    for (int i = -1000; i < 1000; i+=20) {
+        gird_points[cur++] = (vec3){1000, 0, i};
+        gird_points[cur++] = (vec3){-1000, 0, i};
+        gird_points[cur++] = (vec3){i, 0, 1000};
+        gird_points[cur++] = (vec3){i, 0, -1000};
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, grid_buffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(gird_points), gird_points,
+                 GL_STATIC_DRAW);
 
  //   glutFullScreen();
     glutMainLoop();
