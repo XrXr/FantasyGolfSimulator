@@ -82,6 +82,7 @@ GLuint force_color_uni;
 GLuint camera_trans_uni;
 GLuint pers_matrix_uni;
 GLuint model_to_world;
+GLuint trail_buffer;
 
 typedef struct {
     float x;
@@ -111,9 +112,17 @@ float y_rot_angle = 0;
 float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
 float pers_matrix[16];
-const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 1000.0f;
+const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10000.0f;
 const float CAMERA_STEP = 200.0f;
+const int GRID_LENGTH = 1000;
 size_t golf_mesh_vert_count;
+int lx = 0, ly = 0;
+int screen_width;
+int screen_height;
+int window_width;
+int window_height;
+bool window_has_focus = false;
+
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -206,7 +215,7 @@ mat4 rotate(float angle, vec3 axis) {
 static void check_errors(const char* desc) {
     GLenum e = glGetError();
     if (e != GL_NO_ERROR) {
-        fprintf(stderr, "OpenGL error in \"%s\": %d\n", desc, e);
+        fprintf(stderr, "OpenGL error in \"%s\": %#x\n", desc, e);
         exit(20);
     }
 }
@@ -214,16 +223,38 @@ static void check_errors(const char* desc) {
 float dot3(const vec3 a, const vec3 b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
+
+float qudratic(const float t) {
+    return -((600 * t) - ((t*t*t) / 3));
+}
+
+float flight_z(const float z) {
+    return qudratic(z);
+}
+
+float flight_y_base(const float t) {
+    return (150 * t) - (3.255557 * t * t * t);
+}
+
+float flight_y(const float t) {
+    return flight_y_base(t);
+}
+
 float flight_time = 0;
 bool flying = false;
 bool space_released_once = true;
 vec3 golf_ball_pos = {0};
+size_t trail_segment_count = 0;
+const float trail_time_step = 0.02f;
+size_t trail_buf_offset = 0;
+
 void draw(void) {
     // sim
     uint64_t t;
     int ret = elapsed_ns(&t);
     const uint64_t since_last = t - last_sim_stamp;
-    const float step = CAMERA_STEP * (since_last / 1000000000.0f);
+    const float seconds_since_last = since_last / 1000000000.0f;
+    const float step = CAMERA_STEP * seconds_since_last;
     last_sim_stamp = t;
     vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
 
@@ -256,29 +287,21 @@ void draw(void) {
     }
 
     if (flying) {
-        flight_time += since_last / 1000000000.0f;
+        flight_time += seconds_since_last;
 
         const float x = flight_time;
 
-        golf_ball_pos.z = -((150 * x) - ((9 * x * x) / 2));
-        golf_ball_pos.y = (150 * x) - (3.255557 * x * x * x);
+        golf_ball_pos.z = flight_z(flight_time);
+        golf_ball_pos.y = flight_y(flight_time);
 
         //printf("dist to ball %f\n", sqrt(golf_ball_pos.z * golf_ball_pos.z + golf_ball_pos.y * golf_ball_pos.y));
         //printf("flight time %f, y %f\n", flight_time, golf_ball_pos.y);
-
-        if (golf_ball_pos.y <= 0) {
-            printf("final z %f. flight time %f \n", golf_ball_pos.z, flight_time);
-            golf_ball_pos.y = 0;
-            flying = false;
-            flight_time = 0;
-        }
     }
 
     // sim end
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-
     glUseProgram(shader_program);
 
     {  // compute and send the camera transform matrix
@@ -338,9 +361,49 @@ void draw(void) {
     glUniform4f(force_color_uni, 1, 1, 1, 1);  // the grid's color
     glBindBuffer(GL_ARRAY_BUFFER, grid_buffer);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glDrawArrays(GL_LINES, 0, 400);
+    glDrawArrays(GL_LINES, 0, GRID_LENGTH / 10 * sizeof(vec3));
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     check_errors("draw grid");
+
+    if (golf_ball_pos.z != 0) {  // draw the golf ball's trail
+        glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
+
+        if (flying) {
+            const size_t extra_segments = floor(seconds_since_last / trail_time_step);
+            vec3* segment_points = malloc((extra_segments + 2) * sizeof(vec3));
+            float t = flight_time - seconds_since_last + trail_time_step;
+            size_t i = 0;
+            for (; t < flight_time; t += trail_time_step) {
+                segment_points[i++] = (vec3){0, flight_y(t), flight_z(t)};
+            }
+            size_t n_points = i;
+            // there is a segment less than trail_time_step at the end
+            if (t > flight_time) {
+                segment_points[i] = (vec3){0, flight_y(flight_time), flight_z(flight_time)};
+                n_points++;
+            }
+            const size_t upload_size = n_points * sizeof(vec3);
+            glBufferSubData(GL_ARRAY_BUFFER, trail_buf_offset, upload_size, segment_points);
+            //printf("upload_size %zu, offset %zu\n", upload_size, trail_buf_offset);
+            check_errors("draw trail: subdata");
+            trail_buf_offset += upload_size;
+            free(segment_points);
+        }
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+        assert(trail_buf_offset % (sizeof(float) * 3) == 0);
+        int a = (trail_buf_offset / (sizeof(float) * 3));
+        int b = a - 20000;
+        glDrawArrays(GL_LINE_STRIP, 0, a);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        check_errors("draw trail");
+    }
+
+    if (flying && golf_ball_pos.y < 0.0f) {
+        printf("final z %f. flight time %f \n", golf_ball_pos.z, flight_time);
+        golf_ball_pos.y = 0;
+        flying = false;
+        flight_time = 0;
+    }
 
     glDisableVertexAttribArray(0);
     glUseProgram(0);
@@ -349,14 +412,10 @@ void draw(void) {
     glutPostRedisplay();
 }
 
-int previous_time = 0;
 void idle(void) {
-    int current_time = glutGet(GLUT_ELAPSED_TIME);
-    int frame_time = current_time - previous_time;
-    if (frame_time == 0) return;
-    previous_time = current_time;
-
-    printf("%2.2f\r", 1000.0f / (float)(frame_time));
+    if (window_has_focus) {
+        glutWarpPointer(window_width / 2, window_height / 2);
+    }
 }
 
 void camera_pan(vec3* look, float factor) {
@@ -412,21 +471,20 @@ void handle_special_release(int key, int x, int y) {
     set_arrow_key_state(key, false);
 }
 
-
-int lx = 0, ly = 0;
-int screen_width;
-int screen_height;
 void mouse_movement(int x, int y) {
-    if (lx != 0 || ly != 0) {
-        y_rot_angle += (float)(x - lx) / (float)(screen_width) * 365;
-        x_rot_angle += (float)(y - ly) / (float)(screen_height) * 365;
+    const int x_half = x / 2;
+    const int y_half = y / 2;
+    float dist_from_center = sqrt(x_half * x_half + y_half * y_half);
+    if (dist_from_center > 0) {
+        const int center_x = window_width / 2;
+        const int center_y = window_height / 2;
+        y_rot_angle += (float)(x - center_x) / (float)(screen_width) * 365;
+        x_rot_angle += (float)(y - center_y) / (float)(screen_height) * 365;
     }
-
-    lx = x;
-    ly = y;
 }
 
 void handle_mouse_entry(int state) {
+    window_has_focus = state == GLUT_ENTERED;
     lx = ly = 0;
 }
 
@@ -438,7 +496,8 @@ void handle_window_size_change(int w, int h) {
     glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
     glUseProgram(0);
     glViewport(0, 0, w, h);
-    lx = ly = 0;
+    window_width = w;
+    window_height = h;
 }
 
 GLuint compile_shader(GLenum shader_type, const char* shader_source) {
@@ -532,7 +591,7 @@ int main(int argc, char **argv) {
 
     glutInitDisplayMode(GLUT_RGBA|GLUT_SINGLE|GLUT_MULTISAMPLE);
     glutDisplayFunc(draw);
-    //glutIdleFunc(idle);
+    glutIdleFunc(idle);
     glutReshapeFunc(handle_window_size_change);
     glutKeyboardFunc(handle_key);
     glutKeyboardUpFunc(handle_key_release);
@@ -632,17 +691,24 @@ int main(int argc, char **argv) {
 
     // make the grid
     glGenBuffers(1, &grid_buffer);
-    vec3 gird_points[100 * 4];
     size_t cur = 0;
-    for (int i = -1000; i < 1000; i+=20) {
-        gird_points[cur++] = (vec3){1000, 0, i};
-        gird_points[cur++] = (vec3){-1000, 0, i};
-        gird_points[cur++] = (vec3){i, 0, 1000};
-        gird_points[cur++] = (vec3){i, 0, -1000};
+    vec3 gird_points[GRID_LENGTH * 2 / 20 * 4];
+    int i;
+    for (i = -GRID_LENGTH; i < GRID_LENGTH; i+=20) {
+        gird_points[cur++] = (vec3){GRID_LENGTH, 0, i};
+        gird_points[cur++] = (vec3){-GRID_LENGTH, 0, i};
+        gird_points[cur++] = (vec3){i, 0, GRID_LENGTH};
+        gird_points[cur++] = (vec3){i, 0, -GRID_LENGTH};
     }
     glBindBuffer(GL_ARRAY_BUFFER, grid_buffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(gird_points), gird_points,
                  GL_STATIC_DRAW);
+
+    glGenBuffers(1, &trail_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * 500000, NULL, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    check_errors("init");
 
  //   glutFullScreen();
     glutMainLoop();
