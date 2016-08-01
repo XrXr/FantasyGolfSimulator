@@ -117,7 +117,6 @@ const float CAMERA_SPEED = 200.0f;
 const int GRID_LENGTH = 1000;
 const size_t TRAIL_BUF_SIZE = sizeof(float) * 3 * 500000;
 size_t golf_mesh_vert_count;
-int lx = 0, ly = 0;
 int screen_width;
 int screen_height;
 int window_width;
@@ -385,14 +384,22 @@ void draw(void) {
             vec3* points = malloc(upload_size);
             size_t i = 0;
             float t = last_trail_sample_time + TRAIL_SAMPLE_FREQ;
-            for (; t <= flight_time; t += TRAIL_SAMPLE_FREQ) {
+            for (; t <= flight_time && i < n_verts; t += TRAIL_SAMPLE_FREQ) {
                 points[i++] = (vec3){0, flight_y(t), flight_z(t)};
             }
             last_trail_sample_time = t - TRAIL_SAMPLE_FREQ;
-            glBufferSubData(GL_ARRAY_BUFFER, trail_buf_offset, upload_size,
-                            points);
-            trail_buf_offset += upload_size;
-            assert(i == n_verts);
+            if (i == n_verts) {
+                glBufferSubData(GL_ARRAY_BUFFER, trail_buf_offset, upload_size,
+                                points);
+                trail_buf_offset += upload_size;
+            } else {
+                const size_t real_upload_size = i * sizeof(vec3);
+                glBufferSubData(GL_ARRAY_BUFFER, trail_buf_offset,
+                                real_upload_size, points);
+                trail_buf_offset += real_upload_size;
+                printf("Trail prediction missmatch pred:%zu actual %zu\n",
+                       n_verts, i);
+            }
             free(points);
         }
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
@@ -488,7 +495,6 @@ void mouse_movement(int x, int y) {
 
 void handle_mouse_entry(int state) {
     window_has_focus = state == GLUT_ENTERED;
-    lx = ly = 0;
 }
 
 void handle_window_size_change(int w, int h) {
