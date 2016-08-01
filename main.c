@@ -113,8 +113,9 @@ float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
 float pers_matrix[16];
 const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10000.0f;
-const float CAMERA_STEP = 200.0f;
+const float CAMERA_SPEED = 200.0f;
 const int GRID_LENGTH = 1000;
+const size_t TRAIL_BUF_SIZE = sizeof(float) * 3 * 500000;
 size_t golf_mesh_vert_count;
 int lx = 0, ly = 0;
 int screen_width;
@@ -122,7 +123,6 @@ int screen_height;
 int window_width;
 int window_height;
 bool window_has_focus = false;
-
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -232,21 +232,30 @@ float flight_z(const float z) {
     return qudratic(z);
 }
 
-float flight_y_base(const float t) {
-    return (150 * t) - (3.255557 * t * t * t);
-}
-
 float flight_y(const float t) {
-    return flight_y_base(t);
+    return (150 * t) - (3.26667 * t * t * t);
 }
 
 float flight_time = 0;
 bool flying = false;
 bool space_released_once = true;
 vec3 golf_ball_pos = {0};
-size_t trail_segment_count = 0;
-const float trail_time_step = 0.02f;
-size_t trail_buf_offset = 0;
+const float TRAIL_SAMPLE_FREQ = 0.002f;
+size_t trail_buf_offset = sizeof(vec3);
+float last_trail_sample_time;
+
+void flight_init(void) {
+    glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
+    glBufferData(GL_ARRAY_BUFFER, TRAIL_BUF_SIZE, NULL, GL_DYNAMIC_DRAW);
+    vec3 first_point = {0};
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(first_point), &first_point);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    trail_buf_offset = sizeof(first_point);
+
+    golf_ball_pos = (vec3){0};
+    flight_time = 0;
+    last_trail_sample_time = 0;
+}
 
 void draw(void) {
     // sim
@@ -254,7 +263,7 @@ void draw(void) {
     int ret = elapsed_ns(&t);
     const uint64_t since_last = t - last_sim_stamp;
     const float seconds_since_last = since_last / 1000000000.0f;
-    const float step = CAMERA_STEP * seconds_since_last;
+    const float step = CAMERA_SPEED * seconds_since_last;
     last_sim_stamp = t;
     vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
 
@@ -275,6 +284,8 @@ void draw(void) {
     camera_move_in(&look, in_out_dir * step);
     camera_y_translate(y_translate_dir * step);
 
+    const bool old_flying = flying;
+
     if (key_buf[' ']) {
         if (flying) {
             flying = !space_released_once;
@@ -287,15 +298,13 @@ void draw(void) {
     }
 
     if (flying) {
+        if (flight_time == 0) {
+            flight_init();
+        }
         flight_time += seconds_since_last;
-
-        const float x = flight_time;
 
         golf_ball_pos.z = flight_z(flight_time);
         golf_ball_pos.y = flight_y(flight_time);
-
-        //printf("dist to ball %f\n", sqrt(golf_ball_pos.z * golf_ball_pos.z + golf_ball_pos.y * golf_ball_pos.y));
-        //printf("flight time %f, y %f\n", flight_time, golf_ball_pos.y);
     }
 
     // sim end
@@ -368,39 +377,33 @@ void draw(void) {
     if (golf_ball_pos.z != 0) {  // draw the golf ball's trail
         glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
 
-        if (flying) {
-            const size_t extra_segments = floor(seconds_since_last / trail_time_step);
-            vec3* segment_points = malloc((extra_segments + 2) * sizeof(vec3));
-            float t = flight_time - seconds_since_last + trail_time_step;
+        const float dt = flight_time - last_trail_sample_time;
+        const size_t n_verts = floor(dt / TRAIL_SAMPLE_FREQ);
+        const size_t upload_size = n_verts * sizeof(vec3);
+        const bool enough_space = trail_buf_offset + upload_size <= TRAIL_BUF_SIZE;
+        if (flying && n_verts > 0 && enough_space) {
+            vec3* points = malloc(upload_size);
             size_t i = 0;
-            for (; t < flight_time; t += trail_time_step) {
-                segment_points[i++] = (vec3){0, flight_y(t), flight_z(t)};
+            float t = last_trail_sample_time + TRAIL_SAMPLE_FREQ;
+            for (; t <= flight_time; t += TRAIL_SAMPLE_FREQ) {
+                points[i++] = (vec3){0, flight_y(t), flight_z(t)};
             }
-            size_t n_points = i;
-            // there is a segment less than trail_time_step at the end
-            if (t > flight_time) {
-                segment_points[i] = (vec3){0, flight_y(flight_time), flight_z(flight_time)};
-                n_points++;
-            }
-            const size_t upload_size = n_points * sizeof(vec3);
-            glBufferSubData(GL_ARRAY_BUFFER, trail_buf_offset, upload_size, segment_points);
-            //printf("upload_size %zu, offset %zu\n", upload_size, trail_buf_offset);
-            check_errors("draw trail: subdata");
+            last_trail_sample_time = t - TRAIL_SAMPLE_FREQ;
+            glBufferSubData(GL_ARRAY_BUFFER, trail_buf_offset, upload_size,
+                            points);
             trail_buf_offset += upload_size;
-            free(segment_points);
+            assert(i == n_verts);
+            free(points);
         }
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
         assert(trail_buf_offset % (sizeof(float) * 3) == 0);
-        int a = (trail_buf_offset / (sizeof(float) * 3));
-        int b = a - 20000;
-        glDrawArrays(GL_LINE_STRIP, 0, a);
+        glDrawArrays(GL_LINE_STRIP, 0, trail_buf_offset / (sizeof(float) * 3));
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         check_errors("draw trail");
     }
 
     if (flying && golf_ball_pos.y < 0.0f) {
         printf("final z %f. flight time %f \n", golf_ball_pos.z, flight_time);
-        golf_ball_pos.y = 0;
         flying = false;
         flight_time = 0;
     }
@@ -705,8 +708,6 @@ int main(int argc, char **argv) {
                  GL_STATIC_DRAW);
 
     glGenBuffers(1, &trail_buffer);
-    glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * 500000, NULL, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     check_errors("init");
 
