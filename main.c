@@ -73,7 +73,24 @@ const char* frag_shader =
 "   output_color = max(vertex_color, force_color);"
 "}";
 
+
+const char* window_space_vertex_shader =
+"#version 330\n"
+
+"layout(location = 0) in vec2 position;"
+"out vec4 vertex_color;"
+
+"uniform vec2 window_dimentions;"
+
+"void main()"
+"{"
+"    gl_Position = vec4(-1 + position.x / window_dimentions[0], 1 - position.y / window_dimentions[1], 0, 1);"
+"    vertex_color = vec4(1, 1, 1, 1);"
+"}";
+
 GLuint shader_program;
+GLuint window_space_program;
+GLuint window_dimentions_uni;
 GLuint pos_buffer_obj;
 GLuint mesh_buffer;
 GLuint grid_buffer;
@@ -83,6 +100,7 @@ GLuint camera_trans_uni;
 GLuint pers_matrix_uni;
 GLuint model_to_world;
 GLuint trail_buffer;
+GLuint text_vbo;
 
 typedef struct {
     float x;
@@ -409,6 +427,18 @@ void draw(void) {
         check_errors("draw trail");
     }
 
+    glUseProgram(window_space_program);
+    glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    float tmp[] = {
+        0, 0,
+        500, 500
+    };
+    glBufferData(GL_ARRAY_BUFFER, sizeof(tmp), tmp, GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_LINES, 0, sizeof(tmp) / (sizeof(float) * 2));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    check_errors("draw text");
+
     if (flying && golf_ball_pos.y < 0.0f) {
         printf("final z %f. flight time %f \n", golf_ball_pos.z, flight_time);
         flying = false;
@@ -497,12 +527,14 @@ void handle_mouse_entry(int state) {
     window_has_focus = state == GLUT_ENTERED;
 }
 
-void handle_window_size_change(int w, int h) {
+void handle_window_resize(int w, int h) {
     pers_matrix[0] = fFrustumScale / (w / (float)h);
     pers_matrix[5] = fFrustumScale;
 
     glUseProgram(shader_program);
     glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
+    glUseProgram(window_space_program);
+    glUniform2f(window_dimentions_uni, w, h);
     glUseProgram(0);
     glViewport(0, 0, w, h);
     window_width = w;
@@ -601,7 +633,7 @@ int main(int argc, char **argv) {
     glutInitDisplayMode(GLUT_RGBA|GLUT_SINGLE|GLUT_MULTISAMPLE);
     glutDisplayFunc(draw);
     glutIdleFunc(idle);
-    glutReshapeFunc(handle_window_size_change);
+    glutReshapeFunc(handle_window_resize);
     glutKeyboardFunc(handle_key);
     glutKeyboardUpFunc(handle_key_release);
     glutEntryFunc(handle_mouse_entry);
@@ -610,7 +642,9 @@ int main(int argc, char **argv) {
 
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_shader);
     GLuint fs = compile_shader(GL_FRAGMENT_SHADER, frag_shader);
+    GLuint screen_vs = compile_shader(GL_VERTEX_SHADER, window_space_vertex_shader);
     shader_program = make_shader_program(2, vs, fs);
+    window_space_program = make_shader_program(2, screen_vs, fs);
 
     glGenBuffers(1, &pos_buffer_obj);
 
@@ -627,6 +661,8 @@ int main(int argc, char **argv) {
     camera_trans_uni = glGetUniformLocation(shader_program, "camera_trans");
     model_to_world = glGetUniformLocation(shader_program, "model_to_world");
     force_color_uni = glGetUniformLocation(shader_program, "force_color");
+
+    window_dimentions_uni = glGetUniformLocation(window_space_program, "window_dimentions");
 
     pers_matrix[0] = fFrustumScale;
     pers_matrix[5] = fFrustumScale;
@@ -715,6 +751,8 @@ int main(int argc, char **argv) {
 
     glGenBuffers(1, &trail_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    glGenBuffers(1, &text_vbo);
     check_errors("init");
 
  //   glutFullScreen();
