@@ -91,7 +91,6 @@ const char* window_space_vertex_shader =
 GLuint shader_program;
 GLuint window_space_program;
 GLuint window_dimentions_uni;
-GLuint pos_buffer_obj;
 GLuint mesh_buffer;
 GLuint grid_buffer;
 GLuint rotateTransUni;
@@ -645,13 +644,6 @@ int main(int argc, char **argv) {
     GLuint screen_vs = compile_shader(GL_VERTEX_SHADER, window_space_vertex_shader);
     shader_program = make_shader_program(2, vs, fs);
     window_space_program = make_shader_program(2, screen_vs, fs);
-
-    glGenBuffers(1, &pos_buffer_obj);
-
-    glBindBuffer(GL_ARRAY_BUFFER, pos_buffer_obj);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data),
-                 g_vertex_buffer_data, GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     GLuint vao;
     glGenVertexArrays(1, &vao);
