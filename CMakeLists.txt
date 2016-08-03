@@ -14,7 +14,12 @@ include_directories(
     ${GLEW_INCLUDE_DIR}
 )
 
-add_executable(golf_sim main.c)
+file(GLOB project_src
+    "*.h"
+    "*.c"
+)
+
+add_executable(golf_sim ${project_src})
 target_link_libraries(golf_sim
     ${OPENGL_LIBRARIES}
     ${GLUT_LIBRARIES}
