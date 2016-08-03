@@ -8,3 +8,4 @@ CTestTestfile.cmake
 *.sublime-workspace
 golf_sim
 build
+a.out
