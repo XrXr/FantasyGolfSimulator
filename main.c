@@ -140,8 +140,8 @@ bool free_cam_mode = false;
 float y_init_launch = 150;
 #define NUM_FILEDS 2
 text_box_t fields[] = {
-    {375, 50, 10, 175, false, "how are you doing"},
-    {375, 50, 10, 300, false, "I'm different"},
+    {375, 50, 150, 175, false, "how are you doing"},
+    {375, 50, 150, 260, false, "I'm different"},
 };
 text_box_t* active_field = NULL;
 
@@ -313,7 +313,7 @@ void draw(void) {
 
     const bool old_flying = flying;
 
-    if (key_buf[' ']) {
+    if (key_buf[' '] && free_cam_mode) {
         if (flying) {
             flying = !space_released_once;
         } else {
@@ -450,57 +450,63 @@ void draw(void) {
                           (const void *) (sizeof(float) * 2 * 2));
 
     char flight_time_str[100];
-    sprintf(flight_time_str, "t %.4f", flight_time);
+    sprintf(flight_time_str, "t=%.4f", flight_time);
     size_t font_vert_buf_offset = 0;
     render_string(flight_time_str, 0, 0, &font_vert_buf_offset);
 
+    if (!free_cam_mode) {
+        for (int i = 0; i < NUM_FILEDS; i++)
+            text_box_render_font(fields + i, &font_vert_buf_offset);
+        render_string("Angle", 20, 180, &font_vert_buf_offset);
+        render_string("Power", 20, 265, &font_vert_buf_offset);
+    }
+
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, 0);
-    for (int i = 0; i < NUM_FILEDS; i++)
-        text_box_render_font(fields + i, &font_vert_buf_offset);
     glDrawArrays(GL_TRIANGLES, 0, font_vert_buf_offset / sizeof(float) / 6);
     check_errors("draw text");
 
-    glUseProgram(ui_program);
-    glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
-    size_t vert_offset = 0;
-    size_t idx_offset = 0;
-    for (int i = 0; i < NUM_FILEDS; i++)
-        text_box_render_frame(fields + i, &vert_offset, &idx_offset);
-    check_errors("fill box frames buffer");
-    if (blinker_present && active_field) {
-        const size_t num_chars = strlen(active_field->content);
-        const float blinker_x = active_field->x + TEXT_BOX_PADDING +
-                                num_chars * 19;
-        const float verts[] = {
-            // TODO: build time insert named struct for x_advance
-            blinker_x,
-            active_field->y + TEXT_BOX_PADDING,
+    if (!free_cam_mode) {
+        glUseProgram(ui_program);
+        glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
+        size_t vert_offset = 0;
+        size_t idx_offset = 0;
+        for (int i = 0; i < NUM_FILEDS; i++)
+            text_box_render_frame(fields + i, &vert_offset, &idx_offset);
+        check_errors("fill box frames buffer");
+        if (blinker_present && active_field) {
+            const size_t num_chars = strlen(active_field->content);
+            const float blinker_x = active_field->x + TEXT_BOX_PADDING +
+                                    num_chars * 19;
+            const float verts[] = {
+                // TODO: build time insert named struct for x_advance
+                blinker_x,
+                active_field->y + TEXT_BOX_PADDING,
 
-            blinker_x,
-            active_field->y + TEXT_BOX_PADDING +
-                active_field->height - TEXT_BOX_PADDING,
-        };
-        const unsigned short cur_idx = text_box_vert_idx(idx_offset);
-        const unsigned short idxes[] = {cur_idx, cur_idx + 1};
-        glBufferSubData(GL_ARRAY_BUFFER, vert_offset, sizeof(verts), verts);
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, idx_offset, sizeof(idxes), idxes);
-        vert_offset += sizeof(verts);
-        idx_offset += sizeof(idxes);
+                blinker_x,
+                active_field->y + TEXT_BOX_PADDING +
+                    active_field->height - TEXT_BOX_PADDING,
+            };
+            const unsigned short cur_idx = text_box_vert_idx(idx_offset);
+            const unsigned short idxes[] = {cur_idx, cur_idx + 1};
+            glBufferSubData(GL_ARRAY_BUFFER, vert_offset, sizeof(verts), verts);
+            glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, idx_offset, sizeof(idxes), idxes);
+            vert_offset += sizeof(verts);
+            idx_offset += sizeof(idxes);
+        }
+
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glDrawElements(GL_LINE_STRIP, idx_offset / sizeof(unsigned short),
+                       GL_UNSIGNED_SHORT, 0);
+        check_errors("draw text box frames");
     }
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glDrawElements(GL_LINE_STRIP, idx_offset / sizeof(unsigned short), GL_UNSIGNED_SHORT, 0);
-    check_errors("draw text box frames");
+
 
     if (flying && golf_ball_pos.y < 0.0f) {
         printf("Final z %f. Flight time %f \n", golf_ball_pos.z, flight_time);
         flying = false;
     }
-
-    glDisableVertexAttribArray(0);
-    glDisableVertexAttribArray(1);
-    glUseProgram(0);
 
     glutSwapBuffers();
     glutPostRedisplay();
