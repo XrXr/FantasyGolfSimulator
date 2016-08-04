@@ -69,7 +69,8 @@ const char* window_space_vertex_shader =
 
 "void main()"
 "{"
-"    gl_Position = vec4(-1 + position.x / window_dimentions[0], 1 - position.y / window_dimentions[1], 0, 1);"
+"    gl_Position = vec4(-1 + position.x * 2 / window_dimentions[0],"
+"                        1 - position.y * 2 / window_dimentions[1], 0, 1);"
 "    tex_coord = tc;"
 "}";
 
@@ -114,6 +115,7 @@ GLuint ui_idx_buf;
 void camera_pan(vec3* look, float factor);
 void camera_move_in(vec3* look, float factor);
 void camera_y_translate(float factor);
+void input_to_active_field(unsigned char key);
 
 const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10000.0f;
 const float CAMERA_SPEED = 200.0f;
@@ -133,6 +135,13 @@ int window_width;
 int window_height;
 bool window_has_focus = false;
 bool free_cam_mode = false;
+float y_init_launch = 150;
+#define NUM_FILEDS 2
+text_box_t fields[] = {
+    {375, 80, 10, 175, false, "how are you doing"},
+    {375, 80, 10, 300, false, "I'm different"},
+};
+text_box_t* active_field = NULL;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -243,7 +252,7 @@ float flight_z(const float z) {
 }
 
 float flight_y(const float t) {
-    return (150 * t) - (3.26667 * t * t * t);
+    return (y_init_launch * t) - (3.26667 * t * t * t);
 }
 
 float flight_time = 0;
@@ -255,6 +264,7 @@ size_t trail_buf_offset = sizeof(vec3);
 float last_trail_sample_time;
 
 void flight_init(void) {
+    sscanf(fields[0].content, "%f", &y_init_launch);
     glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
     glBufferData(GL_ARRAY_BUFFER, TRAIL_BUF_SIZE, NULL, GL_DYNAMIC_DRAW);
     vec3 first_point = {0};
@@ -275,24 +285,26 @@ void draw(void) {
     const float seconds_since_last = since_last / 1000000000.0f;
     const float step = CAMERA_SPEED * seconds_since_last;
     last_sim_stamp = t;
-    vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
 
-    int in_out_dir = 0;
-    int pan_dir = 0;
-    int y_translate_dir = 0;
+    if (free_cam_mode) {
+        int in_out_dir = 0;
+        int pan_dir = 0;
+        int y_translate_dir = 0;
 
-    pan_dir += (key_buf['a'] || arrow_key.left) * -1;
-    pan_dir += (key_buf['d'] || arrow_key.right);
+        pan_dir += (key_buf['a'] || arrow_key.left) * -1;
+        pan_dir += (key_buf['d'] || arrow_key.right);
 
-    in_out_dir += (key_buf['s'] || arrow_key.down) * -1;
-    in_out_dir += (key_buf['w'] || arrow_key.up);
+        in_out_dir += (key_buf['s'] || arrow_key.down) * -1;
+        in_out_dir += (key_buf['w'] || arrow_key.up);
 
-    y_translate_dir += key_buf['q'] * -1;
-    y_translate_dir += key_buf['e'];
+        y_translate_dir += key_buf['q'] * -1;
+        y_translate_dir += key_buf['e'];
 
-    camera_pan(&look, pan_dir * step);
-    camera_move_in(&look, in_out_dir * step);
-    camera_y_translate(y_translate_dir * step);
+        vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
+        camera_pan(&look, pan_dir * step);
+        camera_move_in(&look, in_out_dir * step);
+        camera_y_translate(y_translate_dir * step);
+    }
 
     const bool old_flying = flying;
 
@@ -439,15 +451,16 @@ void draw(void) {
 
     glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
-    text_box_t box = {400, 80, 0, 300, false, "how are you doing"};
     size_t vert_offset = 0;
     size_t idx_offset = 0;
-    text_box_render_frame(&box, &vert_offset, &idx_offset);
+    for (int i = 0; i < NUM_FILEDS; i++)
+        text_box_render_frame(fields + i, &vert_offset, &idx_offset);
     check_errors("fill box frames buffer");
 
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, 0);
-    text_box_render_font(&box, &font_vert_buf_offset);
+    for (int i = 0; i < NUM_FILEDS; i++)
+        text_box_render_font(fields + i, &font_vert_buf_offset);
     glDrawArrays(GL_TRIANGLES, 0, font_vert_buf_offset / sizeof(float) / 6);
     check_errors("draw text");
 
@@ -455,7 +468,7 @@ void draw(void) {
     glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glDrawElements(GL_LINE_STRIP, 6, GL_UNSIGNED_SHORT, 0);
+    glDrawElements(GL_LINE_STRIP, 12, GL_UNSIGNED_SHORT, 0);
     check_errors("draw text box frames");
 
     if (flying && golf_ball_pos.y < 0.0f) {
@@ -494,8 +507,8 @@ void camera_y_translate(float factor) {
 }
 
 void enter_free_cam_mode(void) {
-    glutWarpPointer(window_width / 2, window_height / 2);
     glutSetCursor(GLUT_CURSOR_NONE);
+    glutWarpPointer(window_width / 2, window_height / 2);
     free_cam_mode = true;
 }
 
@@ -511,6 +524,7 @@ void handle_key(unsigned char key, int x, int y) {
     } else if (key == 27) {
         leave_free_cam_mode();
     }
+    input_to_active_field(key);
     key_buf[key] = true;
 }
 
@@ -557,10 +571,28 @@ void mouse_movement(int x, int y) {
     }
 }
 
+bool activate_clicked_text_box(int x, int y) {
+    active_field = NULL;
+    for (int i = 0; i < NUM_FILEDS; ++i) {
+        const text_box_t box = fields[i];
+        fields[i].active = x >= box.x && x <= box.x + box.width &&
+                           y >= box.y && y <= box.y + box.height;
+        if (fields[i].active)
+            active_field = fields + i;
+    }
+    return active_field != NULL;
+}
+
+void input_to_active_field(unsigned char key) {
+    if (active_field != NULL)
+        text_box_input(active_field, key);
+}
+
 void mouse_click(int button, int state, int x, int y) {
     if (button != GLUT_LEFT_BUTTON || state != GLUT_DOWN) return;
 
-    enter_free_cam_mode();
+    if (!activate_clicked_text_box(x, y))
+        enter_free_cam_mode();
 }
 
 void handle_mouse_entry(int state) {
@@ -811,6 +843,7 @@ int main(int argc, char **argv) {
     glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 2, NULL, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
 
+    glEnable(GL_PRIMITIVE_RESTART);
     glPrimitiveRestartIndex(GOLF_RESTART_IDX);
 
     check_errors("init");
