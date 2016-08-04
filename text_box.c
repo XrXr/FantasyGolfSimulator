@@ -5,7 +5,7 @@
 void text_box_render_frame(text_box_t* t, size_t* vert_buf_offset,
                            size_t* idx_buf_offset) {
 
-    const short cur_idx = (*idx_buf_offset / sizeof(short)) / 6 * 4;
+    const short cur_idx = text_box_vert_idx(*idx_buf_offset);
 
     float frame[] = {
         t->x, t->y,
@@ -13,7 +13,7 @@ void text_box_render_frame(text_box_t* t, size_t* vert_buf_offset,
         t->x + t->width, t->y + t->height,
         t->x + t->width, t->y,
     };
-    short idxes[] = {
+    unsigned short idxes[] = {
         cur_idx, cur_idx + 1, cur_idx + 2,
         cur_idx + 3, cur_idx, GOLF_RESTART_IDX
     };
@@ -25,7 +25,14 @@ void text_box_render_frame(text_box_t* t, size_t* vert_buf_offset,
 }
 
 void text_box_render_font(text_box_t* t, size_t* buf_offset) {
-    render_string(t->content, t->x + 5, t->y + 5, buf_offset);
+    render_string(t->content, t->x + TEXT_BOX_PADDING, t->y + TEXT_BOX_PADDING,
+                  buf_offset);
+}
+
+unsigned short text_box_vert_idx(size_t idx_buf_offset) {
+    // tied to the implementation of text_box_render_frame.
+    // 6 indexes per frame, 4 verts per frame
+    return (idx_buf_offset / sizeof(short)) / 6 * 4;
 }
 
 void text_box_input(text_box_t* t, unsigned char c) {
