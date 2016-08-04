@@ -27,29 +27,41 @@ void render_char(const char c, float x, float y,
     int x_offset = bitmap_font_meta.chars[c - '!'].x_offset;
     int y_offset = bitmap_font_meta.chars[c - '!'].y_offset;
 
+    int top_left_x = x + x_offset;
+    int top_left_y = y + y_offset;
+
+    int bottom_left_x = x + x_offset;
+    int bottom_left_y = y + y_offset + height;
+
+    int top_right_x = x + x_offset + width;
+    int top_right_y = y + y_offset;
+
+    int bottom_right_x = top_right_x;
+    int bottom_right_y = bottom_left_y;
+
     // TODO: lots of dups, should use index drawing
     float full_quad[] = {
-        x + x_offset, y + y_offset,
+        top_left_x, top_left_y,
         width, height,
         tex_x, tex_y,
 
-        x + bitmap_font_meta.x_advance, y + y_offset,
+        top_right_x, top_right_y,
         width, height,
         tex_x + width, tex_y,
 
-        x + x_offset, y + LINE_HEIGHT,
+        bottom_left_x, bottom_left_y,
         width, height,
         tex_x, tex_y + height,
 
-        x + bitmap_font_meta.x_advance, y + y_offset,
+        top_right_x, top_right_y,
         width, height,
         tex_x + width, tex_y,
 
-        x + bitmap_font_meta.x_advance, y + LINE_HEIGHT,
+        bottom_right_x, bottom_right_y,
         width, height,
         tex_x + width, tex_y + height,
 
-        x + x_offset, y + LINE_HEIGHT,
+        bottom_left_x, bottom_left_y,
         width, height,
         tex_x, tex_y + height,
     };
