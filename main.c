@@ -13,8 +13,10 @@
 
 #define TINYOBJ_LOADER_C_IMPLEMENTATION
 #include "tinyobj_loader_c.h"
+#include "common.h"
 #include "clock.h"
 #include "font.h"
+#include "text_box.h"
 
 #define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
 
@@ -79,10 +81,20 @@ const char* font_fragment_shader =
 "void main()"
 "{"
 "   output_color = texture(sampler, vec2(tex_coord.x/texture_dimentions[0], tex_coord.y/texture_dimentions[1]));"
-//"   output_color = vec4(1, 1, 1, 1);"
+"}";
+
+const char* ui_frag_shader =
+"#version 330\n"
+
+"out vec4 output_color;"
+"uniform vec4 color = vec4(1, 1, 1, 1);"
+"void main()"
+"{"
+"   output_color = color;"
 "}";
 
 GLuint shader_program;
+GLuint ui_program;
 GLuint window_space_program;
 GLuint window_dimentions_uni;
 GLuint mesh_buffer;
@@ -94,23 +106,8 @@ GLuint pers_matrix_uni;
 GLuint model_to_world;
 GLuint trail_buffer;
 GLuint text_vbo;
-
-typedef struct {
-    float x;
-    float y;
-    float z;
-} vec3;
-
-typedef struct {
-    float x;
-    float y;
-    float z;
-    float w;
-} vec4;
-
-typedef struct {
-    float value[16];
-} mat4;
+GLuint ui_vert_buf;
+GLuint ui_idx_buf;
 
 void camera_pan(vec3* look, float factor);
 void camera_move_in(vec3* look, float factor);
@@ -270,7 +267,7 @@ void flight_init(void) {
 void draw(void) {
     // sim
     uint64_t t;
-    int ret = elapsed_ns(&t);
+    bool ret = elapsed_ns(&t);
     const uint64_t since_last = t - last_sim_stamp;
     const float seconds_since_last = since_last / 1000000000.0f;
     const float step = CAMERA_SPEED * seconds_since_last;
@@ -426,18 +423,37 @@ void draw(void) {
     glEnableVertexAttribArray(2);
     const int stride = sizeof(float) * 2 * 3;
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, 0);
+    // TODO REMOVE
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride,
                           (const void *) (sizeof(float) * 2));
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride,
                           (const void *) (sizeof(float) * 2 * 2));
 
-
     char flight_time_str[100];
     sprintf(flight_time_str, "t %.4f", flight_time);
-    render_string(flight_time_str, 0, 0);
-    glDrawArrays(GL_TRIANGLES, 0, strlen(flight_time_str) * 6);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    size_t font_vert_buf_offset = 0;
+    render_string(flight_time_str, 0, 0, &font_vert_buf_offset);
+
+    glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
+    text_box_t box = {400, 80, 0, 300, false, "how are you doing"};
+    size_t vert_offset = 0;
+    size_t idx_offset = 0;
+    text_box_render_frame(&box, &vert_offset, &idx_offset);
+    check_errors("fill box frames buffer");
+
+    glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, 0);
+    text_box_render_font(&box, &font_vert_buf_offset);
+    glDrawArrays(GL_TRIANGLES, 0, font_vert_buf_offset / sizeof(float) / 6);
     check_errors("draw text");
+
+    glUseProgram(ui_program);
+    glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glDrawElements(GL_LINE_STRIP, 6, GL_UNSIGNED_SHORT, 0);
+    check_errors("draw text box frames");
 
     if (flying && golf_ball_pos.y < 0.0f) {
         printf("Final z %f. Flight time %f \n", golf_ball_pos.z, flight_time);
@@ -451,7 +467,6 @@ void draw(void) {
     glutSwapBuffers();
     glutPostRedisplay();
 }
-
 
 void idle(void) {
     if (window_has_focus) {
@@ -534,8 +549,11 @@ void handle_window_resize(int w, int h) {
 
     glUseProgram(shader_program);
     glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
+    // TODO: use uniform buffer
     glUseProgram(window_space_program);
     glUniform2f(window_dimentions_uni, w, h);
+    glUseProgram(ui_program);
+    glUniform2f(glGetUniformLocation(ui_program, "window_dimentions"), w, h);
     glUseProgram(0);
     glViewport(0, 0, w, h);
     window_width = w;
@@ -643,10 +661,12 @@ int main(int argc, char **argv) {
 
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_shader);
     GLuint fs = compile_shader(GL_FRAGMENT_SHADER, frag_shader);
-    GLuint screen_vs = compile_shader(GL_VERTEX_SHADER, window_space_vertex_shader);
+    GLuint window_vs = compile_shader(GL_VERTEX_SHADER, window_space_vertex_shader);
     GLuint font_fs = compile_shader(GL_FRAGMENT_SHADER, font_fragment_shader);
+    GLuint ui_fs = compile_shader(GL_FRAGMENT_SHADER, ui_frag_shader);
     shader_program = make_shader_program(2, vs, fs);
-    window_space_program = make_shader_program(2, screen_vs, font_fs);
+    ui_program = make_shader_program(2, window_vs, ui_fs);
+    window_space_program = make_shader_program(2, window_vs, font_fs);
 
     GLuint vao;
     glGenVertexArrays(1, &vao);
@@ -656,8 +676,8 @@ int main(int argc, char **argv) {
     camera_trans_uni = glGetUniformLocation(shader_program, "camera_trans");
     model_to_world = glGetUniformLocation(shader_program, "model_to_world");
     force_color_uni = glGetUniformLocation(shader_program, "force_color");
-
-    window_dimentions_uni = glGetUniformLocation(window_space_program, "window_dimentions");
+    window_dimentions_uni = glGetUniformLocation(window_space_program,
+                                                 "window_dimentions");
 
     pers_matrix[0] = fFrustumScale;
     pers_matrix[5] = fFrustumScale;
@@ -749,12 +769,19 @@ int main(int argc, char **argv) {
 
     glGenBuffers(1, &text_vbo);
 
-
-    font_init();
-    // glBindTexture(GL_TEXTURE_2D, 0);
+    font_init();  // binds a GL_TEXTURE_2D
 
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
     glBufferData(GL_ARRAY_BUFFER, 9000 * 3 * sizeof(float), NULL, GL_DYNAMIC_DRAW);
+
+    glGenBuffers(1, &ui_vert_buf);
+    glGenBuffers(1, &ui_idx_buf);
+    glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
+    glBufferData(GL_ARRAY_BUFFER, 300 * 2 * sizeof(float), NULL, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, 200 * sizeof(short), NULL, GL_DYNAMIC_DRAW);
+
+    glPrimitiveRestartIndex(GOLF_RESTART_IDX);
 
     check_errors("init");
 
