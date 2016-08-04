@@ -98,6 +98,8 @@ const char* ui_frag_shader =
 "   output_color = color;"
 "}";
 
+#define deg_to_rad(X) (X * (M_PI / 180))
+
 GLuint shader_program;
 GLuint ui_program;
 GLuint window_space_program;
@@ -137,13 +139,25 @@ int window_width;
 int window_height;
 bool window_has_focus = false;
 bool free_cam_mode = false;
-float y_init_launch = 150;
+float y_launch_speed = 150;
+float z_launch_speed = 600;
+const size_t NUM_FILEDS = 2;
+const size_t ANGLE_FIELD = 0;
+const size_t POWER_FIELD = 1;
 #define NUM_FILEDS 2
 text_box_t fields[] = {
-    {375, 50, 150, 175, false, "how are you doing"},
-    {375, 50, 150, 260, false, "I'm different"},
+    {375, 50, 150, 175, false, 10, "25", text_box_positive_nums_only},
+    {375, 50, 150, 260, false, 10, "500", text_box_positive_nums_only},
 };
 text_box_t* active_field = NULL;
+float flight_time = 0;
+bool flying = false;
+bool space_released_once = true;
+vec3 golf_ball_pos = {0};
+const float TRAIL_SAMPLE_FREQ = 0.002f;
+size_t trail_buf_offset = sizeof(vec3);
+float last_trail_sample_time;
+bool blinker_present = false;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -245,29 +259,26 @@ float dot3(const vec3 a, const vec3 b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-float qudratic(const float t) {
-    return -((600 * t) - ((t*t*t) / 3));
-}
-
-float flight_z(const float z) {
-    return qudratic(z);
+float flight_z(const float t) {
+    return -((z_launch_speed * t) - ((t*t*t) / 3));
 }
 
 float flight_y(const float t) {
-    return (y_init_launch * t) - (3.26667 * t * t * t);
+    return (y_launch_speed * t) - (3.26667 * t * t * t);
 }
 
-float flight_time = 0;
-bool flying = false;
-bool space_released_once = true;
-vec3 golf_ball_pos = {0};
-const float TRAIL_SAMPLE_FREQ = 0.002f;
-size_t trail_buf_offset = sizeof(vec3);
-float last_trail_sample_time;
-bool blinker_present = false;
-
 void flight_init(void) {
-    sscanf(fields[0].content, "%f", &y_init_launch);
+    float power, angle;
+    int ret = sscanf(fields[ANGLE_FIELD].content, "%f", &angle);
+    assert(ret == 1);
+    ret = sscanf(fields[POWER_FIELD].content, "%f", &power);
+    assert(ret == 1);
+
+    const float rad_angle = deg_to_rad(angle);
+    z_launch_speed = power * cos(rad_angle);
+    y_launch_speed = power * sin(rad_angle);
+    printf("power %f angle %f z %f y %f\n", power, angle, z_launch_speed, y_launch_speed);
+
     glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
     glBufferData(GL_ARRAY_BUFFER, TRAIL_BUF_SIZE, NULL, GL_DYNAMIC_DRAW);
     vec3 first_point = {0};
@@ -454,7 +465,7 @@ void draw(void) {
     size_t font_vert_buf_offset = 0;
     render_string(flight_time_str, 0, 0, &font_vert_buf_offset);
 
-    if (!free_cam_mode) {
+    if (!free_cam_mode || !flying) {
         for (int i = 0; i < NUM_FILEDS; i++)
             text_box_render_font(fields + i, &font_vert_buf_offset);
         render_string("Angle", 20, 180, &font_vert_buf_offset);
@@ -466,7 +477,7 @@ void draw(void) {
     glDrawArrays(GL_TRIANGLES, 0, font_vert_buf_offset / sizeof(float) / 6);
     check_errors("draw text");
 
-    if (!free_cam_mode) {
+    if (!free_cam_mode || !flying) {
         glUseProgram(ui_program);
         glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
@@ -477,10 +488,10 @@ void draw(void) {
         check_errors("fill box frames buffer");
         if (blinker_present && active_field) {
             const size_t num_chars = strlen(active_field->content);
+            // TODO: build time insert named struct for x_advance
             const float blinker_x = active_field->x + TEXT_BOX_PADDING +
                                     num_chars * 19;
             const float verts[] = {
-                // TODO: build time insert named struct for x_advance
                 blinker_x,
                 active_field->y + TEXT_BOX_PADDING,
 
@@ -501,7 +512,6 @@ void draw(void) {
                        GL_UNSIGNED_SHORT, 0);
         check_errors("draw text box frames");
     }
-
 
     if (flying && golf_ball_pos.y < 0.0f) {
         printf("Final z %f. Flight time %f \n", golf_ball_pos.z, flight_time);
