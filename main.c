@@ -63,7 +63,9 @@ const char* window_space_vertex_shader =
 "layout(location = 2) in vec2 tc;"
 "out vec2 tex_coord;"
 "out vec2 c_dimentions;"
-"uniform vec2 window_dimentions;"
+"layout(std140) uniform shared {"
+"   vec2 window_dimentions;"
+"};"
 
 "void main()"
 "{"
@@ -547,13 +549,12 @@ void handle_window_resize(int w, int h) {
     pers_matrix[0] = fFrustumScale / (w / (float)h);
     pers_matrix[5] = fFrustumScale;
 
+    struct { float w, h; } dimentions = {w, h};
+    // we only have one GL_UNIFORM_BUFFER
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(dimentions), &dimentions);
+
     glUseProgram(shader_program);
     glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
-    // TODO: use uniform buffer
-    glUseProgram(window_space_program);
-    glUniform2f(window_dimentions_uni, w, h);
-    glUseProgram(ui_program);
-    glUniform2f(glGetUniformLocation(ui_program, "window_dimentions"), w, h);
     glUseProgram(0);
     glViewport(0, 0, w, h);
     window_width = w;
@@ -780,6 +781,12 @@ int main(int argc, char **argv) {
     glBufferData(GL_ARRAY_BUFFER, 300 * 2 * sizeof(float), NULL, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, 200 * sizeof(short), NULL, GL_DYNAMIC_DRAW);
+
+    GLuint ubo;  // for window dimentions
+    glGenBuffers(1, &ubo);
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 2, NULL, GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
 
     glPrimitiveRestartIndex(GOLF_RESTART_IDX);
 
