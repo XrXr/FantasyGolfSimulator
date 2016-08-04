@@ -83,7 +83,9 @@ const char* font_fragment_shader =
 "uniform vec2 texture_dimentions = vec2(256, 256);"
 "void main()"
 "{"
-"   output_color = texture(sampler, vec2(tex_coord.x/texture_dimentions[0], tex_coord.y/texture_dimentions[1]));"
+"   vec4 sample = texture(sampler, vec2(tex_coord.x/texture_dimentions[0], tex_coord.y/texture_dimentions[1]));"
+"   float a = float(length(sample.xyz) > 0);"
+"   output_color = vec4(sample.xyz, a);"
 "}";
 
 const char* ui_frag_shader =
@@ -138,8 +140,8 @@ bool free_cam_mode = false;
 float y_init_launch = 150;
 #define NUM_FILEDS 2
 text_box_t fields[] = {
-    {375, 80, 10, 175, false, "how are you doing"},
-    {375, 80, 10, 300, false, "I'm different"},
+    {375, 50, 10, 175, false, "how are you doing"},
+    {375, 50, 10, 300, false, "I'm different"},
 };
 text_box_t* active_field = NULL;
 
@@ -334,7 +336,7 @@ void draw(void) {
 
     // sim end
 
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(shader_program);
 
@@ -543,6 +545,10 @@ void handle_key(unsigned char key, int x, int y) {
         return glutLeaveMainLoop();
     } else if (key == 27) {
         leave_free_cam_mode();
+        if (active_field) {
+            active_field->active = false;
+            active_field = NULL;
+        }
     }
     input_to_active_field(key);
     key_buf[key] = true;
@@ -866,6 +872,9 @@ int main(int argc, char **argv) {
 
     glEnable(GL_PRIMITIVE_RESTART);
     glPrimitiveRestartIndex(GOLF_RESTART_IDX);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     check_errors("init");
 
