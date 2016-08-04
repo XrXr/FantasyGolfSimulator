@@ -115,6 +115,10 @@ void camera_pan(vec3* look, float factor);
 void camera_move_in(vec3* look, float factor);
 void camera_y_translate(float factor);
 
+const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10000.0f;
+const float CAMERA_SPEED = 200.0f;
+const int GRID_LENGTH = 1000;
+const size_t TRAIL_BUF_SIZE = sizeof(float) * 3 * 500000;
 vec3 camera_pos = {0, 3, 18};
 bool key_buf[256];
 struct { bool up, down, left, right; } arrow_key;
@@ -122,16 +126,13 @@ float y_rot_angle = 0;
 float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
 float pers_matrix[16];
-const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10000.0f;
-const float CAMERA_SPEED = 200.0f;
-const int GRID_LENGTH = 1000;
-const size_t TRAIL_BUF_SIZE = sizeof(float) * 3 * 500000;
 size_t golf_mesh_vert_count;
 int screen_width;
 int screen_height;
 int window_width;
 int window_height;
 bool window_has_focus = false;
+bool free_cam_mode = false;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -471,7 +472,7 @@ void draw(void) {
 }
 
 void idle(void) {
-    if (window_has_focus) {
+    if (window_has_focus && free_cam_mode) {
         glutWarpPointer(window_width / 2, window_height / 2);
     }
 }
@@ -492,10 +493,23 @@ void camera_y_translate(float factor) {
     camera_pos.y += factor;
 }
 
+void enter_free_cam_mode(void) {
+    glutWarpPointer(window_width / 2, window_height / 2);
+    glutSetCursor(GLUT_CURSOR_NONE);
+    free_cam_mode = true;
+}
+
+void leave_free_cam_mode(void) {
+    glutSetCursor(GLUT_CURSOR_INHERIT);
+    free_cam_mode = false;
+}
+
 void handle_key(unsigned char key, int x, int y) {
     // ctrl+q sends 17
     if (key == 17 && glutGetModifiers() == GLUT_ACTIVE_CTRL) {
         return glutLeaveMainLoop();
+    } else if (key == 27) {
+        leave_free_cam_mode();
     }
     key_buf[key] = true;
 }
@@ -530,15 +544,23 @@ void handle_special_release(int key, int x, int y) {
 }
 
 void mouse_movement(int x, int y) {
-    const int x_half = x / 2;
-    const int y_half = y / 2;
-    float dist_from_center = sqrt(x_half * x_half + y_half * y_half);
-    if (dist_from_center > 0) {
-        const int center_x = window_width / 2;
-        const int center_y = window_height / 2;
-        y_rot_angle += (float)(x - center_x) / (float)(screen_width) * 365;
-        x_rot_angle += (float)(y - center_y) / (float)(screen_height) * 365;
+    if (free_cam_mode) {
+        const int x_half = x / 2;
+        const int y_half = y / 2;
+        float dist_from_center = sqrt(x_half * x_half + y_half * y_half);
+        if (dist_from_center > 0) {
+            const int center_x = window_width / 2;
+            const int center_y = window_height / 2;
+            y_rot_angle += (float)(x - center_x) / screen_width * 365;
+            x_rot_angle += (float)(y - center_y) / screen_height * 365;
+        }
     }
+}
+
+void mouse_click(int button, int state, int x, int y) {
+    if (button != GLUT_LEFT_BUTTON || state != GLUT_DOWN) return;
+
+    enter_free_cam_mode();
 }
 
 void handle_mouse_entry(int state) {
@@ -642,6 +664,7 @@ int main(int argc, char **argv) {
     screen_width = glutGet(GLUT_SCREEN_WIDTH);
     screen_height = glutGet(GLUT_SCREEN_HEIGHT);
     glutPassiveMotionFunc(mouse_movement);
+    glutMouseFunc(mouse_click);
 
     GLenum err = glewInit();
     if (err != GLEW_OK) {
