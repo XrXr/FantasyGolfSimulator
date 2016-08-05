@@ -107,7 +107,7 @@ GLuint window_dimentions_uni;
 GLuint golf_ball_buf;
 GLuint wind_arrow_buf;
 GLuint grid_buffer;
-GLuint rotateTransUni;
+GLuint post_pers_trans_uni;
 GLuint force_color_uni;
 GLuint camera_trans_uni;
 GLuint pers_matrix_uni;
@@ -145,10 +145,12 @@ float z_launch_speed = 600;
 const size_t NUM_FILEDS = 2;
 const size_t ANGLE_FIELD = 0;
 const size_t POWER_FIELD = 1;
-#define NUM_FILEDS 2
+const size_t WIND_ANGLE_FIELD = 2;
+#define NUM_FILEDS 3
 text_box_t fields[] = {
     {375, 50, 150, 175, false, 10, "25", text_box_positive_nums_only},
     {375, 50, 150, 260, false, 10, "500", text_box_positive_nums_only},
+    {375, 50, 150, 345, false, 10, "0", text_box_positive_nums_only},
 };
 text_box_t* active_field = NULL;
 float flight_time = 0;
@@ -159,6 +161,8 @@ const float TRAIL_SAMPLE_FREQ = 0.002f;
 size_t trail_buf_offset = sizeof(vec3);
 float last_trail_sample_time;
 bool blinker_present = false;
+float wind_angle = 0;
+float x_wind_influence = 0;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -240,12 +244,6 @@ mat4 rotate(float around_x, float around_y, float around_z) {
         [10] = cy,
         [15] = 1
     };
-    // y_rotate[0] = cos(angle);
-    // y_rotate[2] = -sin(angle);
-    // y_rotate[5] = 1;
-    // y_rotate[8] = sin(angle);
-    // y_rotate[10] = cos(angle);
-    // y_rotate[15] = 1;
 
     float x_rotate[16] = {
         [0] = 1,
@@ -255,12 +253,6 @@ mat4 rotate(float around_x, float around_y, float around_z) {
         [10] = cx,
         [15] = 1
     };
-    // x_rotate[0] = 1;
-    // x_rotate[5] = cos(angle);
-    // x_rotate[6] = sin(angle);
-    // x_rotate[9] = -sin(angle);
-    // x_rotate[10] = cos(angle);
-    // x_rotate[15] = 1;
 
     float z_rotate[16] = {
         [0] = cz,
@@ -289,12 +281,16 @@ float dot3(const vec3 a, const vec3 b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-float flight_z(const float t) {
-    return -((z_launch_speed * t) - ((t*t*t) / 3));
+float flight_x(const float t) {
+    return x_wind_influence * t * 30;
 }
 
 float flight_y(const float t) {
     return (y_launch_speed * t) - (3.26667 * t * t * t);
+}
+
+float flight_z(const float t) {
+    return -((z_launch_speed * t) - ((t*t*t) / 3));
 }
 
 void flight_init(void) {
@@ -307,7 +303,8 @@ void flight_init(void) {
     const float rad_angle = deg_to_rad(angle);
     z_launch_speed = power * cos(rad_angle);
     y_launch_speed = power * sin(rad_angle);
-    printf("power %f angle %f z %f y %f\n", power, angle, z_launch_speed, y_launch_speed);
+
+    x_wind_influence = -sin(wind_angle);
 
     glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
     glBufferData(GL_ARRAY_BUFFER, TRAIL_BUF_SIZE, NULL, GL_DYNAMIC_DRAW);
@@ -373,8 +370,9 @@ void draw(void) {
         }
         flight_time += seconds_since_last;
 
-        golf_ball_pos.z = flight_z(flight_time);
+        golf_ball_pos.x = flight_x(flight_time);
         golf_ball_pos.y = flight_y(flight_time);
+        golf_ball_pos.z = flight_z(flight_time);
     }
 
     // sim end
@@ -384,8 +382,7 @@ void draw(void) {
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(shader_program);
 
-    glUniformMatrix4fv(glGetUniformLocation(shader_program, "post_pers_trans"),
-        1, GL_FALSE, id);
+    glUniformMatrix4fv(post_pers_trans_uni, 1, GL_FALSE, id);
 
     {  // compute and send the camera transform matrix
         float c_translate[16] = {0};
@@ -442,7 +439,7 @@ void draw(void) {
             size_t i = 0;
             float t = last_trail_sample_time + TRAIL_SAMPLE_FREQ;
             for (; t <= flight_time && i < n_verts; t += TRAIL_SAMPLE_FREQ) {
-                points[i++] = (vec3){0, flight_y(t), flight_z(t)};
+                points[i++] = (vec3){flight_x(t), flight_y(t), flight_z(t)};
             }
             last_trail_sample_time = t - TRAIL_SAMPLE_FREQ;
             if (i == n_verts) {
@@ -474,10 +471,10 @@ void draw(void) {
             [0]=1,
             [5]=1,
             [10]=1,
-            [14]=-10,
+            [14]=-15,
             [15]=1
         };
-        mat4 rot = rotate(0, wind_arrow_y_rot, 0);
+        mat4 rot = rotate(0, wind_arrow_y_rot, wind_angle);
         float (*(mult_ins)[2])[16] = {&translate, &rot.value};
         float mesh_model_trans[16];
         matrix_mul(mult_ins, 2, &mesh_model_trans);
@@ -487,12 +484,10 @@ void draw(void) {
             [5]=1,
             [10]=1,
             [12]=.8,
-            [13]=-.8,
+            [13]=-.65,
             [15]=1
         };
-        glUniformMatrix4fv(glGetUniformLocation(shader_program, "post_pers_trans"),
-                           1, GL_FALSE, post_trans);
-
+        glUniformMatrix4fv(post_pers_trans_uni, 1, GL_FALSE, post_trans);
     }
     glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, id);
     glDrawArrays(GL_TRIANGLES, 0, wind_arrow_vert_count);
@@ -676,8 +671,13 @@ bool activate_clicked_text_box(int x, int y) {
 }
 
 void input_to_active_field(unsigned char key) {
-    if (active_field != NULL)
-        text_box_input(active_field, key);
+    if (active_field == NULL) return;
+
+    text_box_input(active_field, key);
+
+    if (fields[WIND_ANGLE_FIELD].active) {
+        sscanf(fields[WIND_ANGLE_FIELD].content, "%f", &wind_angle);
+    }
 }
 
 void mouse_click(int button, int state, int x, int y) {
@@ -886,6 +886,7 @@ int main(int argc, char **argv) {
     force_color_uni = glGetUniformLocation(shader_program, "force_color");
     window_dimentions_uni = glGetUniformLocation(window_space_program,
                                                  "window_dimentions");
+    post_pers_trans_uni = glGetUniformLocation(shader_program, "post_pers_trans");
 
     pers_matrix[0] = fFrustumScale;
     pers_matrix[5] = fFrustumScale;
