@@ -375,6 +375,7 @@ void draw(void) {
         golf_ball_pos.z = flight_z(flight_time);
     }
 
+    const bool display_ui = !free_cam_mode || !flying;
     // sim end
 
     const float id[16] = {[0]=1, [5]=1, [10]=1, [15]=1};
@@ -410,8 +411,6 @@ void draw(void) {
         mesh_model_trans[14] = golf_ball_pos.z;
         glUniformMatrix4fv(model_to_world, 1, GL_FALSE, mesh_model_trans);
     }
-
-    glUniform4f(force_color_uni, 0, 0, 0, 0);
 
     glBindBuffer(GL_ARRAY_BUFFER, golf_ball_buf);
     glEnableVertexAttribArray(0);
@@ -463,10 +462,7 @@ void draw(void) {
         check_errors("draw trail");
     }
 
-    glBindBuffer(GL_ARRAY_BUFFER, wind_arrow_buf);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glUniform4f(force_color_uni, 0, 0, 0, 0);
-    {
+    {  // wind arrow
         float translate[16] = {
             [0]=1,
             [5]=1,
@@ -489,9 +485,14 @@ void draw(void) {
         };
         glUniformMatrix4fv(post_pers_trans_uni, 1, GL_FALSE, post_trans);
     }
-    glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, id);
-    glDrawArrays(GL_TRIANGLES, 0, wind_arrow_vert_count);
-    check_errors("draw wind arrow");
+    if (display_ui) {
+        glBindBuffer(GL_ARRAY_BUFFER, wind_arrow_buf);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+        glUniform4f(force_color_uni, 0, 0, 0, 0);
+        glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, id);
+        glDrawArrays(GL_TRIANGLES, 0, wind_arrow_vert_count);
+        check_errors("draw wind arrow");
+    }
 
     glUseProgram(window_space_program);
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
@@ -510,7 +511,7 @@ void draw(void) {
     size_t font_vert_buf_offset = 0;
     render_string(flight_time_str, 0, 0, &font_vert_buf_offset);
 
-    if (!free_cam_mode || !flying) {
+    if (display_ui) {
         for (int i = 0; i < NUM_FILEDS; i++)
             text_box_render_font(fields + i, &font_vert_buf_offset);
         render_string("Angle", 20, 180, &font_vert_buf_offset);
@@ -522,7 +523,7 @@ void draw(void) {
     glDrawArrays(GL_TRIANGLES, 0, font_vert_buf_offset / sizeof(float) / 6);
     check_errors("draw text");
 
-    if (!free_cam_mode || !flying) {
+    if (display_ui) {
         glUseProgram(ui_program);
         glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
@@ -894,9 +895,9 @@ int main(int argc, char **argv) {
     pers_matrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
     pers_matrix[11] = -1.0f;
 
-    // glEnable(GL_CULL_FACE);
-    // glCullFace(GL_BACK);
-    // glFrontFace(GL_CW);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CW);
 
     glUseProgram(shader_program);
     glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
