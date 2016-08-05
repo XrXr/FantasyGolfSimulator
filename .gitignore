@@ -9,3 +9,4 @@ CTestTestfile.cmake
 golf_sim
 build
 a.out
+*.blend1

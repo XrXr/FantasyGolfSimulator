@@ -30,17 +30,17 @@ const char* vertex_shader =
 "uniform mat4 model_to_world;"
 "uniform mat4 pers_matrix;"
 "uniform mat4 camera_trans;"
+"uniform mat4 post_pers_trans;"
 
 "void main()"
 "{"
 "    vec4 pos = camera_trans * model_to_world * vec4(position, 1);"
-"    gl_Position = pers_matrix * pos;"
+"    gl_Position = post_pers_trans * pers_matrix * pos;"
 "    mat3 modelToCameraM = mat3(camera_trans * model_to_world);"
 "    vec3 normCamSpace = normalize(modelToCameraM * position);"
 "    float cosAngIncidence = dot(normCamSpace, position);"
 "    cosAngIncidence = clamp(cosAngIncidence, 0, 1);"
-"    float dist = length(position);"
-"    vertex_color = cosAngIncidence * (1/pow(((dist/5) + 1), 2)) *  vec4(1, 1, 1, 1);"
+"    vertex_color = cosAngIncidence * vec4(1, 1, 1, 1);"
 "}";
 
 const char* frag_shader =
@@ -104,7 +104,8 @@ GLuint shader_program;
 GLuint ui_program;
 GLuint window_space_program;
 GLuint window_dimentions_uni;
-GLuint mesh_buffer;
+GLuint golf_ball_buf;
+GLuint wind_arrow_buf;
 GLuint grid_buffer;
 GLuint rotateTransUni;
 GLuint force_color_uni;
@@ -132,7 +133,7 @@ float y_rot_angle = 0;
 float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
 float pers_matrix[16];
-size_t golf_mesh_vert_count;
+size_t golf_mesh_vert_count, wind_arrow_vert_count;
 int screen_width;
 int screen_height;
 int window_width;
@@ -219,32 +220,61 @@ void matrix_mul(float (**in)[16], size_t size, float (*out)[16]) {
     memcpy(*out, cur, sizeof(cur));
 }
 
-// Rotate about an axis by an angle in degrees using Rodrigues' rotation
-// formula. Found on Wikipedia
-mat4 rotate(float angle, vec3 axis) {
-    const float a_rad = angle * (M_PI / 180);
-    const float c = cos(a_rad);
-    const float s = sin(a_rad);
-    const float c_comp = 1 - c;
-    const float xz = axis.x * axis.z;
-    const float xy = axis.x * axis.y;
-    const float yz = axis.y * axis.z;
+// Euler's angle rotation matrix. Arguments in degrees
+mat4 rotate(float around_x, float around_y, float around_z) {
+    const float x_rad = deg_to_rad(around_x);
+    const float cx = cos(x_rad);
+    const float sx = sin(x_rad);
+    const float y_rad = deg_to_rad(around_y);
+    const float cy = cos(y_rad);
+    const float sy = sin(y_rad);
+    const float z_rad = deg_to_rad(around_z);
+    const float cz = cos(z_rad);
+    const float sz = sin(z_rad);
 
-    mat4 ret = { {0} };
-    ret.value[0] = c + (axis.x * axis.x * c_comp);
-    ret.value[1] = xy * c_comp + axis.z * s;
-    ret.value[2] = (-axis.y) * s + xz * c_comp;
+    float y_rotate[16] = {
+        [0] = cy,
+        [2] = -sy,
+        [5] = 1,
+        [8] = sy,
+        [10] = cy,
+        [15] = 1
+    };
+    // y_rotate[0] = cos(angle);
+    // y_rotate[2] = -sin(angle);
+    // y_rotate[5] = 1;
+    // y_rotate[8] = sin(angle);
+    // y_rotate[10] = cos(angle);
+    // y_rotate[15] = 1;
 
-    ret.value[4] = xy * c_comp - axis.z * s;
-    ret.value[5] = c + (axis.y * axis.y * c_comp);
-    ret.value[6] = axis.x * s + yz * c_comp;
+    float x_rotate[16] = {
+        [0] = 1,
+        [5] = cx,
+        [6] = sx,
+        [9] = -sx,
+        [10] = cx,
+        [15] = 1
+    };
+    // x_rotate[0] = 1;
+    // x_rotate[5] = cos(angle);
+    // x_rotate[6] = sin(angle);
+    // x_rotate[9] = -sin(angle);
+    // x_rotate[10] = cos(angle);
+    // x_rotate[15] = 1;
 
-    ret.value[8] = axis.y * s + xz * c_comp;
-    ret.value[9] = (-axis.x) * s + yz * c_comp;
-    ret.value[10] = c + (axis.z * axis.z * c_comp);
+    float z_rotate[16] = {
+        [0] = cz,
+        [1] = sz,
+        [4] = -sz,
+        [5] = cz,
+        [10] = 1,
+        [15] = 1,
+    };
 
-    ret.value[15] = 1;
-    return ret;
+    float (*(mult_ins)[3])[16] = {&z_rotate, &x_rotate, &y_rotate};
+    mat4 trans;
+    matrix_mul(mult_ins, 3, &trans.value);
+    return trans;
 }
 
 static void check_errors(const char* desc) {
@@ -302,6 +332,8 @@ void draw(void) {
 
     blinker_present = ((t / 1000000000) % 2) == 0;
 
+    const float wind_arrow_y_rot = (t % 2000000000) / 1999999999.0f * 365;
+
     if (free_cam_mode) {
         int in_out_dir = 0;
         int pan_dir = 0;
@@ -347,9 +379,13 @@ void draw(void) {
 
     // sim end
 
+    const float id[16] = {[0]=1, [5]=1, [10]=1, [15]=1};
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(shader_program);
+
+    glUniformMatrix4fv(glGetUniformLocation(shader_program, "post_pers_trans"),
+        1, GL_FALSE, id);
 
     {  // compute and send the camera transform matrix
         float c_translate[16] = {0};
@@ -362,27 +398,11 @@ void draw(void) {
         c_translate[13] = -camera_pos.y;
         c_translate[14] = -camera_pos.z;
 
-        float c_y_rot[16] = {0};
-        float angle = y_rot_angle * (M_PI / 180);
-        c_y_rot[0] = cos(angle);
-        c_y_rot[2] = -sin(angle);
-        c_y_rot[5] = 1;
-        c_y_rot[8] = sin(angle);
-        c_y_rot[10] = cos(angle);
-        c_y_rot[15] = 1;
+        mat4 c_rotate = rotate(x_rot_angle, y_rot_angle, 0);
 
-        float c_x_rot[16] = {0};
-        angle = x_rot_angle * (M_PI / 180);
-        c_x_rot[0] = 1;
-        c_x_rot[5] = cos(angle);
-        c_x_rot[6] = sin(angle);
-        c_x_rot[9] = -sin(angle);
-        c_x_rot[10] = cos(angle);
-        c_x_rot[15] = 1;
-
-        float (*(mult_buf)[3])[16] = {&c_x_rot, &c_y_rot, &c_translate};
+        float (*(mult_buf)[2])[16] = {&c_rotate.value, &c_translate};
         float trans[16];
-        matrix_mul(mult_buf, 3, &trans);
+        matrix_mul(mult_buf, 2, &trans);
         glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, trans);
     }
 
@@ -396,14 +416,12 @@ void draw(void) {
 
     glUniform4f(force_color_uni, 0, 0, 0, 0);
 
-    glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, golf_ball_buf);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
     glDrawArrays(GL_TRIANGLES, 0, golf_mesh_vert_count);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    check_errors("draw mesh");
+    check_errors("draw golf ball");
 
-    float id[16] = {[0]=1, [5]=1, [10]=1, [15]=1};
     glUniformMatrix4fv(model_to_world, 1, GL_FALSE, id);
     glUniform4f(force_color_uni, 1, 1, 1, 1);  // the grid's color
     glBindBuffer(GL_ARRAY_BUFFER, grid_buffer);
@@ -447,6 +465,38 @@ void draw(void) {
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         check_errors("draw trail");
     }
+
+    glBindBuffer(GL_ARRAY_BUFFER, wind_arrow_buf);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform4f(force_color_uni, 0, 0, 0, 0);
+    {
+        float translate[16] = {
+            [0]=1,
+            [5]=1,
+            [10]=1,
+            [14]=-10,
+            [15]=1
+        };
+        mat4 rot = rotate(0, wind_arrow_y_rot, 0);
+        float (*(mult_ins)[2])[16] = {&translate, &rot.value};
+        float mesh_model_trans[16];
+        matrix_mul(mult_ins, 2, &mesh_model_trans);
+        glUniformMatrix4fv(model_to_world, 1, GL_FALSE, mesh_model_trans);
+        float post_trans[16] = {
+            [0]=1,
+            [5]=1,
+            [10]=1,
+            [12]=.8,
+            [13]=-.8,
+            [15]=1
+        };
+        glUniformMatrix4fv(glGetUniformLocation(shader_program, "post_pers_trans"),
+                           1, GL_FALSE, post_trans);
+
+    }
+    glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, id);
+    glDrawArrays(GL_TRIANGLES, 0, wind_arrow_vert_count);
+    check_errors("draw wind arrow");
 
     glUseProgram(window_space_program);
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
@@ -729,6 +779,66 @@ char* read_obj(const char* file_name, size_t* buf_len) {
     return buf;
 }
 
+GLuint read_mesh(const char* file_name, size_t* vert_count_out) {
+    GLuint gl_buf;
+    glGenBuffers(1, &gl_buf);
+    size_t filesize;
+    char* buf = read_obj(file_name, &filesize);
+
+    tinyobj_attrib_t attrib;
+    tinyobj_shape_t* shapes;
+    tinyobj_material_t* materials;
+    size_t nshape, nmat;
+    tinyobj_parse_obj(&attrib, &shapes, &nshape, &materials, &nmat,
+                      buf, filesize, TINYOBJ_FLAG_TRIANGULATE);
+
+    *vert_count_out = attrib.num_face_num_verts * 3 * 3;
+    const size_t mesh_size = attrib.num_face_num_verts * sizeof(float) * 3 * 3;
+    float* mesh = malloc(mesh_size);
+
+    size_t mesh_offset = 0;
+    size_t face_offset = 0;
+    for (size_t i = 0; i < attrib.num_face_num_verts; i++) {
+        assert(attrib.face_num_verts[i] % 3 == 0); // all triangular faces
+        for (size_t f = 0; f < (size_t)attrib.face_num_verts[i]; f+=3) {
+            tinyobj_vertex_index_t idx0 = attrib.faces[face_offset + 3 * f + 0];
+            tinyobj_vertex_index_t idx1 = attrib.faces[face_offset + 3 * f + 1];
+            tinyobj_vertex_index_t idx2 = attrib.faces[face_offset + 3 * f + 2];
+
+            for (int k = 0; k < 3; k++) {
+                int f0 = idx0.v_idx;
+                int f1 = idx1.v_idx;
+                int f2 = idx2.v_idx;
+
+                mesh[mesh_offset + 0 + k] = attrib.vertices[3 * (size_t)f0 + k];
+                mesh[mesh_offset + 3 + k] = attrib.vertices[3 * (size_t)f1 + k];
+                mesh[mesh_offset + 6 + k] = attrib.vertices[3 * (size_t)f2 + k];
+            }
+
+            mesh_offset += 9;
+        }
+        face_offset += (size_t)attrib.face_num_verts[i];
+    }
+
+    tinyobj_attrib_free(&attrib);
+    tinyobj_shapes_free(shapes, nshape);
+    tinyobj_materials_free(materials, nmat);
+
+    // for (int i = 0; i < attrib.num_face_num_verts; i++) {
+    //     for (int j = 0; j < 3; j++) {
+    //         printf("x=%f y=%f z%f\n", mesh[i * 9 + j * 3 + 0], mesh[i * 9 + j * 3 + 1], mesh[i * 9 + j * 3 + 2]);
+    //     }
+    // }
+
+    // printf("%d\n", golf_mesh_vert_count);
+
+    glBindBuffer(GL_ARRAY_BUFFER, gl_buf);
+    glBufferData(GL_ARRAY_BUFFER, mesh_size, mesh, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    free(mesh);
+    return gl_buf;
+}
+
 int main(int argc, char **argv) {
     glutInitContextVersion(3, 3);
     glewExperimental = GL_TRUE;
@@ -783,69 +893,13 @@ int main(int argc, char **argv) {
     pers_matrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
     pers_matrix[11] = -1.0f;
 
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glFrontFace(GL_CW);
+    // glEnable(GL_CULL_FACE);
+    // glCullFace(GL_BACK);
+    // glFrontFace(GL_CW);
 
     glUseProgram(shader_program);
     glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
     glUseProgram(0);
-
-    size_t filesize;
-    char* buf = read_obj("golf_ball.obj", &filesize);
-
-    tinyobj_attrib_t attrib;
-    tinyobj_shape_t* shapes;
-    tinyobj_material_t* materials;
-    size_t nshape, nmat;
-    tinyobj_parse_obj(&attrib, &shapes, &nshape, &materials, &nmat,
-                      buf, filesize, TINYOBJ_FLAG_TRIANGULATE);
-
-    glGenBuffers(1, &mesh_buffer);
-    golf_mesh_vert_count = attrib.num_face_num_verts * 3 * 3;
-    const size_t mesh_size = attrib.num_face_num_verts * sizeof(float) * 3 * 3;
-    float* mesh = malloc(mesh_size);
-
-    size_t mesh_offset = 0;
-    size_t face_offset = 0;
-    for (size_t i = 0; i < attrib.num_face_num_verts; i++) {
-        assert(attrib.face_num_verts[i] % 3 == 0); // all triangular faces
-        for (size_t f = 0; f < (size_t)attrib.face_num_verts[i]; f+=3) {
-            tinyobj_vertex_index_t idx0 = attrib.faces[face_offset + 3 * f + 0];
-            tinyobj_vertex_index_t idx1 = attrib.faces[face_offset + 3 * f + 1];
-            tinyobj_vertex_index_t idx2 = attrib.faces[face_offset + 3 * f + 2];
-
-            for (int k = 0; k < 3; k++) {
-                int f0 = idx0.v_idx;
-                int f1 = idx1.v_idx;
-                int f2 = idx2.v_idx;
-
-                mesh[mesh_offset + 0 + k] = attrib.vertices[3 * (size_t)f0 + k];
-                mesh[mesh_offset + 3 + k] = attrib.vertices[3 * (size_t)f1 + k];
-                mesh[mesh_offset + 6 + k] = attrib.vertices[3 * (size_t)f2 + k];
-            }
-
-            mesh_offset += 9;
-        }
-        face_offset += (size_t)attrib.face_num_verts[i];
-    }
-
-    tinyobj_attrib_free(&attrib);
-    tinyobj_shapes_free(shapes, nshape);
-    tinyobj_materials_free(materials, nmat);
-
-    // for (int i = 0; i < attrib.num_face_num_verts; i++) {
-    //     for (int j = 0; j < 3; j++) {
-    //         printf("x=%f y=%f z%f\n", mesh[i * 9 + j * 3 + 0], mesh[i * 9 + j * 3 + 1], mesh[i * 9 + j * 3 + 2]);
-    //     }
-    // }
-
-    // printf("%d\n", golf_mesh_vert_count);
-
-    glBindBuffer(GL_ARRAY_BUFFER, mesh_buffer);
-    glBufferData(GL_ARRAY_BUFFER, mesh_size, mesh, GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    free(mesh);
 
     // make the grid
     glGenBuffers(1, &grid_buffer);
@@ -885,6 +939,9 @@ int main(int argc, char **argv) {
     glBindBuffer(GL_UNIFORM_BUFFER, ubo);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 2, NULL, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
+
+    golf_ball_buf = read_mesh("golf_ball.obj", &golf_mesh_vert_count);
+    wind_arrow_buf = read_mesh("arrow.obj", &wind_arrow_vert_count);
 
     glEnable(GL_PRIMITIVE_RESTART);
     glPrimitiveRestartIndex(GOLF_RESTART_IDX);
