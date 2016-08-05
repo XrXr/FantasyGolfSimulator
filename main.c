@@ -98,11 +98,70 @@ const char* ui_frag_shader =
 "   output_color = color;"
 "}";
 
+const char* grid_vert_shader =
+"#version 330\n"
+
+"layout(location = 0) in vec4 position;"
+"void main()"
+"{"
+"   gl_Position = position;"
+"}";
+
+const char* grid_geo_shader =
+"#version 330 core\n"
+"layout(points) in;"
+"layout(line_strip, max_vertices=12)out;"
+"uniform mat4 pers_matrix;"
+"uniform mat4 camera_trans;"
+"smooth out vec4 color;"
+"void main()"
+"{"
+"   float x = gl_in[0].gl_Position.x;"
+"   float z = gl_in[0].gl_Position.z;"
+"   float grid_x = floor(x / 20) * 20;"
+"   float grid_z = floor(z / 20) * 20;"
+"   mat4 trans = pers_matrix * camera_trans;"
+"   gl_Position = trans * vec4(grid_x - 60, 0, grid_z, 1);"
+"   color = vec4(1, 1, 1, 0);"
+"   EmitVertex();"
+"   gl_Position = trans * vec4(grid_x, 0, grid_z, 1);"
+"   color = vec4(1, 1, 1, 1);"
+"   EmitVertex();"
+"   gl_Position = trans * vec4(grid_x + 60, 0, grid_z, 1);"
+"   color = vec4(1, 1, 1, 0);"
+"   EmitVertex();"
+"   EndPrimitive();"
+
+"   for (int i = int(grid_x - 40); i <= int(grid_x + 40); i += 20) {"
+"      vec4 lcolor = vec4(1, 1, 1, .7 / (abs(i - grid_x) / 10 + 1));"
+"      color = lcolor;"
+"      gl_Position = trans * vec4(i, 0, grid_z - 40, 1);"
+"      EmitVertex();"
+"      color = lcolor;"
+"      gl_Position = trans * vec4(i, 0, grid_z + 40, 1);"
+"      EmitVertex();"
+"      EndPrimitive();"
+"   }"
+"}";
+
+const char* grid_frag_shader =
+"#version 330\n"
+"smooth in vec4 color;"
+
+"out vec4 output_color;"
+//"uniform vec4 color = vec4(1, 1, 1, 1);"
+"void main()"
+"{"
+"   output_color = color.a * color;"
+"}";
+
+
 #define deg_to_rad(X) (X * (M_PI / 180))
 
 GLuint shader_program;
 GLuint ui_program;
 GLuint window_space_program;
+GLuint grid_program;
 GLuint window_dimentions_uni;
 GLuint golf_ball_buf;
 GLuint wind_arrow_buf;
@@ -385,6 +444,7 @@ void draw(void) {
 
     glUniformMatrix4fv(post_pers_trans_uni, 1, GL_FALSE, id);
 
+    float camera_trans[16];
     {  // compute and send the camera transform matrix
         float c_translate[16] = {0};
         c_translate[0] = 1;
@@ -399,9 +459,8 @@ void draw(void) {
         mat4 c_rotate = rotate(x_rot_angle, y_rot_angle, 0);
 
         float (*(mult_buf)[2])[16] = {&c_rotate.value, &c_translate};
-        float trans[16];
-        matrix_mul(mult_buf, 2, &trans);
-        glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, trans);
+        matrix_mul(mult_buf, 2, &camera_trans);
+        glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, camera_trans);
     }
 
     {
@@ -419,13 +478,6 @@ void draw(void) {
     check_errors("draw golf ball");
 
     glUniformMatrix4fv(model_to_world, 1, GL_FALSE, id);
-    glUniform4f(force_color_uni, 1, 1, 1, 1);  // the grid's color
-    glBindBuffer(GL_ARRAY_BUFFER, grid_buffer);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glDrawArrays(GL_LINES, 0, GRID_LENGTH / 10 * sizeof(vec3));
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    check_errors("draw grid");
-
     if (golf_ball_pos.z != 0) {  // draw the golf ball's trail
         glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
 
@@ -493,6 +545,22 @@ void draw(void) {
         glDrawArrays(GL_TRIANGLES, 0, wind_arrow_vert_count);
         check_errors("draw wind arrow");
     }
+
+    glUseProgram(grid_program);
+    glUniformMatrix4fv(glGetUniformLocation(grid_program, "camera_trans"),
+                       1, GL_FALSE, camera_trans);
+    glUniformMatrix4fv(glGetUniformLocation(grid_program, "pers_matrix"),
+                       1, GL_FALSE, pers_matrix);
+
+    glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glDisable(GL_BLEND);
+    glDrawArrays(GL_POINTS, 0, trail_buf_offset/sizeof(float));
+    glEnable(GL_BLEND);
+    check_errors("draw grid");
+    // glDrawArrays(GL_LINES, 0, GRID_LENGTH / 10 * sizeof(vec3));
+    // glDrawArrays(GL_LINES, 0, GRID_LENGTH / 10 * sizeof(vec3));
+    // glDrawArrays(GL_LINES, 0, GRID_LENGTH / 10 * sizeof(vec3));
 
     glUseProgram(window_space_program);
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
@@ -710,7 +778,8 @@ void handle_window_resize(int w, int h) {
 
 GLuint compile_shader(GLenum shader_type, const char* shader_source) {
     GLuint shader = glCreateShader(shader_type);
-    glShaderSource(shader, 1, &shader_source, NULL);
+    const GLint len[1] = {strlen(shader_source)};
+    glShaderSource(shader, 1, &shader_source, len);
 
     glCompileShader(shader);
 
@@ -873,7 +942,13 @@ int main(int argc, char **argv) {
     GLuint window_vs = compile_shader(GL_VERTEX_SHADER, window_space_vertex_shader);
     GLuint font_fs = compile_shader(GL_FRAGMENT_SHADER, font_fragment_shader);
     GLuint ui_fs = compile_shader(GL_FRAGMENT_SHADER, ui_frag_shader);
+
+    GLuint grid_vs = compile_shader(GL_VERTEX_SHADER, grid_vert_shader);
+    GLuint grid_gs = compile_shader(GL_GEOMETRY_SHADER, grid_geo_shader);
+    GLuint grid_fs = compile_shader(GL_FRAGMENT_SHADER, grid_frag_shader);
+
     shader_program = make_shader_program(2, vs, fs);
+    grid_program = make_shader_program(3, grid_vs, grid_gs, grid_fs);
     ui_program = make_shader_program(2, window_vs, ui_fs);
     window_space_program = make_shader_program(2, window_vs, font_fs);
 
