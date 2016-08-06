@@ -24,7 +24,6 @@ const char* vertex_shader =
 "#version 330\n"
 
 "layout(location = 0) in vec3 position;"
-//"layout(location = 1) in vec4 in_color;"
 "out vec4 vertex_color;"
 
 "uniform mat4 model_to_world;"
@@ -110,35 +109,47 @@ const char* grid_vert_shader =
 const char* grid_geo_shader =
 "#version 330 core\n"
 "layout(points) in;"
-"layout(line_strip, max_vertices=12)out;"
+"layout(line_strip, max_vertices=256)out;"
 "uniform mat4 pers_matrix;"
 "uniform mat4 camera_trans;"
-"smooth out vec4 color;"
+"const int num_hori_line = 4;"
+"out vec4 color;"
+"mat4 trans;"
+"float grid_x;"
+"float grid_z;"
+
+"void horizontal_line(int i) {"
+"       gl_Position = trans * vec4(grid_x - 60, 0, grid_z + 20 * i, 1);"
+"       color = vec4(1, 1, 1, 0);"
+"       EmitVertex();"
+"       gl_Position = trans * vec4(grid_x, 0, grid_z + 20 * i, 1);"
+"       color = vec4(1, 1, 1, 1);"
+"       EmitVertex();"
+"       gl_Position = trans * vec4(grid_x + 60, 0, grid_z + 20 * i, 1);"
+"       color = vec4(1, 1, 1, 0);"
+"       EmitVertex();"
+"       EndPrimitive();"
+"}"
+
 "void main()"
 "{"
 "   float x = gl_in[0].gl_Position.x;"
 "   float z = gl_in[0].gl_Position.z;"
-"   float grid_x = floor(x / 20) * 20;"
-"   float grid_z = floor(z / 20) * 20;"
-"   mat4 trans = pers_matrix * camera_trans;"
-"   gl_Position = trans * vec4(grid_x - 60, 0, grid_z, 1);"
-"   color = vec4(1, 1, 1, 0);"
-"   EmitVertex();"
-"   gl_Position = trans * vec4(grid_x, 0, grid_z, 1);"
-"   color = vec4(1, 1, 1, 1);"
-"   EmitVertex();"
-"   gl_Position = trans * vec4(grid_x + 60, 0, grid_z, 1);"
-"   color = vec4(1, 1, 1, 0);"
-"   EmitVertex();"
-"   EndPrimitive();"
-
-"   for (int i = int(grid_x - 40); i <= int(grid_x + 40); i += 20) {"
-"      vec4 lcolor = vec4(1, 1, 1, .7 / (abs(i - grid_x) / 10 + 1));"
+"   grid_x = trunc(x / 20.0) * 20;"
+"   grid_z = trunc(z / 20.0) * 20;"
+"   trans = pers_matrix * camera_trans;"
+"   for (int i = 0; i < num_hori_line; i++) {"
+"       horizontal_line(i);"
+"       horizontal_line(-i);"
+"   }"
+"   for (int i = -40; i <= 40; i += 20) {"
+"      vec4 lcolor = vec4(1, 1, 1, 1.0 / (abs(i) / 10 + 1));"
+"      float xi = grid_x + i;"
 "      color = lcolor;"
-"      gl_Position = trans * vec4(i, 0, grid_z - 40, 1);"
+"      gl_Position = trans * vec4(xi, 0, grid_z - 80, 1);"
 "      EmitVertex();"
 "      color = lcolor;"
-"      gl_Position = trans * vec4(i, 0, grid_z + 40, 1);"
+"      gl_Position = trans * vec4(xi, 0, grid_z + 80, 1);"
 "      EmitVertex();"
 "      EndPrimitive();"
 "   }"
@@ -146,10 +157,9 @@ const char* grid_geo_shader =
 
 const char* grid_frag_shader =
 "#version 330\n"
-"smooth in vec4 color;"
+"in vec4 color;"
 
 "out vec4 output_color;"
-//"uniform vec4 color = vec4(1, 1, 1, 1);"
 "void main()"
 "{"
 "   output_color = color.a * color;"
@@ -170,6 +180,7 @@ GLuint post_pers_trans_uni;
 GLuint force_color_uni;
 GLuint camera_trans_uni;
 GLuint pers_matrix_uni;
+GLuint grid_num_hori_uni;
 GLuint model_to_world;
 GLuint trail_buffer;
 GLuint text_vbo;
@@ -181,7 +192,7 @@ void camera_move_in(vec3* look, float factor);
 void camera_y_translate(float factor);
 void input_to_active_field(unsigned char key);
 
-const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 10000.0f;
+const float fFrustumScale = 2.0f, fzNear = 0.025f, fzFar = 100000.0f;
 const float CAMERA_SPEED = 200.0f;
 const int GRID_LENGTH = 1000;
 const size_t TRAIL_BUF_SIZE = sizeof(float) * 3 * 500000;
@@ -546,21 +557,25 @@ void draw(void) {
         check_errors("draw wind arrow");
     }
 
-    glUseProgram(grid_program);
-    glUniformMatrix4fv(glGetUniformLocation(grid_program, "camera_trans"),
-                       1, GL_FALSE, camera_trans);
-    glUniformMatrix4fv(glGetUniformLocation(grid_program, "pers_matrix"),
-                       1, GL_FALSE, pers_matrix);
+    {
+        glUseProgram(grid_program);
+        glUniformMatrix4fv(glGetUniformLocation(grid_program, "camera_trans"),
+                           1, GL_FALSE, camera_trans);
+        glUniformMatrix4fv(glGetUniformLocation(grid_program, "pers_matrix"),
+                           1, GL_FALSE, pers_matrix);
 
-    glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glDisable(GL_BLEND);
-    glDrawArrays(GL_POINTS, 0, trail_buf_offset/sizeof(float));
-    glEnable(GL_BLEND);
-    check_errors("draw grid");
-    // glDrawArrays(GL_LINES, 0, GRID_LENGTH / 10 * sizeof(vec3));
-    // glDrawArrays(GL_LINES, 0, GRID_LENGTH / 10 * sizeof(vec3));
-    // glDrawArrays(GL_LINES, 0, GRID_LENGTH / 10 * sizeof(vec3));
+        const float around_camera[] = {
+            camera_pos.x, camera_pos.y, camera_pos.z,
+        };
+        glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+        glBufferSubData(GL_ARRAY_BUFFER, trail_buf_offset,
+                        sizeof(around_camera), around_camera);
+        glDisable(GL_BLEND);
+        glDrawArrays(GL_POINTS, 0, trail_buf_offset / sizeof(vec3) + 1);
+        glEnable(GL_BLEND);
+        check_errors("draw grid");
+    }
 
     glUseProgram(window_space_program);
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
@@ -960,9 +975,10 @@ int main(int argc, char **argv) {
     camera_trans_uni = glGetUniformLocation(shader_program, "camera_trans");
     model_to_world = glGetUniformLocation(shader_program, "model_to_world");
     force_color_uni = glGetUniformLocation(shader_program, "force_color");
+    post_pers_trans_uni = glGetUniformLocation(shader_program, "post_pers_trans");
     window_dimentions_uni = glGetUniformLocation(window_space_program,
                                                  "window_dimentions");
-    post_pers_trans_uni = glGetUniformLocation(shader_program, "post_pers_trans");
+    grid_num_hori_uni = glGetUniformLocation(grid_program, "num_hori_line");
 
     pers_matrix[0] = fFrustumScale;
     pers_matrix[5] = fFrustumScale;
@@ -1010,6 +1026,9 @@ int main(int argc, char **argv) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, 200 * sizeof(unsigned short),
                  NULL, GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
+    glBufferData(GL_ARRAY_BUFFER, TRAIL_BUF_SIZE, NULL, GL_DYNAMIC_DRAW);
 
     GLuint ubo;  // for window dimentions
     glGenBuffers(1, &ubo);
