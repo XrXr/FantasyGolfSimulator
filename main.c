@@ -14,164 +14,20 @@
 #include "font.h"
 #include "text_box.h"
 
+// shaders
+#include "build/mesh_vs.h"
+#include "build/mesh_fs.h"
+#include "build/window_space_vs.h"
+#include "build/font_fs.h"
+#include "build/ui_fs.h"
+#include "build/grid_vs.h"
+#include "build/grid_gs.h"
+#include "build/grid_fs.h"
+
 // asset inserts
 #include "build/bitmap_font_meta.h"
 #include "build/golf_ball_mesh.h"
 #include "build/wind_arrow_mesh.h"
-
-const char* vertex_shader =
-"#version 330 core\n"
-
-"layout(location = 0) in vec3 position;"
-"layout(location = 1) in vec3 normal_in;"
-"out vec3 nnormal;"
-"out vec3 frag_world_pos;"
-"out vec3 lp;"
-
-"uniform mat4 model_to_world;"
-"uniform mat4 pers_matrix;"
-"uniform mat4 camera_trans;"
-"uniform vec3 light_pos = vec3(0, 0, 2);"
-"uniform mat4 post_pers_trans;"
-
-"void main()"
-"{"
-"    vec4 pos = camera_trans * model_to_world * vec4(position, 1);"
-"    gl_Position = post_pers_trans * pers_matrix * pos;"
-"    frag_world_pos = vec3(model_to_world * vec4(position, 1));"
-"    nnormal = mat3(transpose(inverse(model_to_world))) * normal_in;"
-"    lp = light_pos;"
-"}";
-
-const char* frag_shader =
-"#version 330 core\n"
-
-"in vec3 nnormal;"
-"in vec3 frag_world_pos;"
-"in vec3 lp;"
-"out vec4 output_color;"
-"uniform vec4 force_color;"
-"uniform vec3 light_color = vec3(1);"
-"uniform vec3 surface_color;"
-"void main()"
-"{"
-"   vec3 norm = normalize(nnormal);"
-"   vec3 light_dir = normalize(lp - frag_world_pos);"
-"   float diff = max(dot(light_dir, norm), 0.0);"
-"   vec3 diffuse = diff * light_color;"
-"   output_color = max(vec4(diffuse * surface_color, 1.0), force_color);"
-"}";
-
-
-const char* window_space_vertex_shader =
-"#version 330\n"
-
-"layout(location = 0) in vec2 position;"
-"layout(location = 1) in vec2 tc;"
-"out vec2 tex_coord;"
-"out vec2 c_dimentions;"
-"layout(std140) uniform shared {"
-"   vec2 window_dimentions;"
-"};"
-
-"void main()"
-"{"
-"    gl_Position = vec4(-1 + position.x * 2 / window_dimentions[0],"
-"                        1 - position.y * 2 / window_dimentions[1], 0, 1);"
-"    tex_coord = tc;"
-"}";
-
-const char* font_fragment_shader =
-"#version 330\n"
-
-"out vec4 output_color;"
-"in vec2 tex_coord;"
-"uniform sampler2D sampler;"
-"uniform vec2 texture_dimentions = vec2(256, 256);"
-"void main()"
-"{"
-"   vec4 sample = texture(sampler, vec2(tex_coord.x/texture_dimentions[0], tex_coord.y/texture_dimentions[1]));"
-"   float a = float(length(sample.xyz) > 0);"
-"   output_color = vec4(sample.xyz, a);"
-"}";
-
-const char* ui_frag_shader =
-"#version 330\n"
-
-"out vec4 output_color;"
-"uniform vec4 color = vec4(1, 1, 1, 1);"
-"void main()"
-"{"
-"   output_color = color;"
-"}";
-
-const char* grid_vert_shader =
-"#version 330\n"
-
-"layout(location = 0) in vec4 position;"
-"void main()"
-"{"
-"   gl_Position = position;"
-"}";
-
-const char* grid_geo_shader =
-"#version 330 core\n"
-"layout(points) in;"
-"layout(line_strip, max_vertices=256)out;"
-"uniform mat4 pers_matrix;"
-"uniform mat4 camera_trans;"
-"const int num_hori_line = 4;"
-"out vec4 color;"
-"mat4 trans;"
-"float grid_x;"
-"float grid_z;"
-
-"void horizontal_line(int i) {"
-"       gl_Position = trans * vec4(grid_x - 60, 0, grid_z + 20 * i, 1);"
-"       color = vec4(1, 1, 1, 0);"
-"       EmitVertex();"
-"       gl_Position = trans * vec4(grid_x, 0, grid_z + 20 * i, 1);"
-"       color = vec4(1, 1, 1, 1);"
-"       EmitVertex();"
-"       gl_Position = trans * vec4(grid_x + 60, 0, grid_z + 20 * i, 1);"
-"       color = vec4(1, 1, 1, 0);"
-"       EmitVertex();"
-"       EndPrimitive();"
-"}"
-
-"void main()"
-"{"
-"   float x = gl_in[0].gl_Position.x;"
-"   float z = gl_in[0].gl_Position.z;"
-"   grid_x = trunc(x / 20.0) * 20;"
-"   grid_z = trunc(z / 20.0) * 20;"
-"   trans = pers_matrix * camera_trans;"
-"   for (int i = 0; i < num_hori_line; i++) {"
-"       horizontal_line(i);"
-"       horizontal_line(-i);"
-"   }"
-"   for (int i = -40; i <= 40; i += 20) {"
-"      vec4 lcolor = vec4(1, 1, 1, 1.0 / (abs(i) / 10 + 1));"
-"      float xi = grid_x + i;"
-"      color = lcolor;"
-"      gl_Position = trans * vec4(xi, 0, grid_z - 80, 1);"
-"      EmitVertex();"
-"      color = lcolor;"
-"      gl_Position = trans * vec4(xi, 0, grid_z + 80, 1);"
-"      EmitVertex();"
-"      EndPrimitive();"
-"   }"
-"}";
-
-const char* grid_frag_shader =
-"#version 330\n"
-"in vec4 color;"
-
-"out vec4 output_color;"
-"void main()"
-"{"
-"   output_color = color.a * color;"
-"}";
 
 GLuint shader_program;
 GLuint ui_program;
@@ -890,7 +746,7 @@ GLuint make_shader_program(int n, ...) {
 GLuint read_mesh(const char* obj_text, size_t* vert_count_out) {
     GLuint gl_buf;
     glGenBuffers(1, &gl_buf);
-    size_t len = strlen(obj_text);
+    size_t len = strlen(obj_text) + 1;
 
     tinyobj_attrib_t attrib;
     tinyobj_shape_t* shapes;
@@ -971,15 +827,15 @@ int main(int argc, char **argv) {
     glutSpecialFunc(handle_special);
     glutSpecialUpFunc(handle_special_release);
 
-    GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_shader);
-    GLuint fs = compile_shader(GL_FRAGMENT_SHADER, frag_shader);
-    GLuint window_vs = compile_shader(GL_VERTEX_SHADER, window_space_vertex_shader);
-    GLuint font_fs = compile_shader(GL_FRAGMENT_SHADER, font_fragment_shader);
-    GLuint ui_fs = compile_shader(GL_FRAGMENT_SHADER, ui_frag_shader);
+    GLuint vs = compile_shader(GL_VERTEX_SHADER, MESH_VS);
+    GLuint fs = compile_shader(GL_FRAGMENT_SHADER, MESH_FS);
+    GLuint window_vs = compile_shader(GL_VERTEX_SHADER, WINDOW_SPACE_VS);
+    GLuint font_fs = compile_shader(GL_FRAGMENT_SHADER, FONT_FS);
+    GLuint ui_fs = compile_shader(GL_FRAGMENT_SHADER, UI_FS);
 
-    GLuint grid_vs = compile_shader(GL_VERTEX_SHADER, grid_vert_shader);
-    GLuint grid_gs = compile_shader(GL_GEOMETRY_SHADER, grid_geo_shader);
-    GLuint grid_fs = compile_shader(GL_FRAGMENT_SHADER, grid_frag_shader);
+    GLuint grid_vs = compile_shader(GL_VERTEX_SHADER, GRID_VS);
+    GLuint grid_gs = compile_shader(GL_GEOMETRY_SHADER, GRID_GS);
+    GLuint grid_fs = compile_shader(GL_FRAGMENT_SHADER, GRID_FS);
 
     shader_program = make_shader_program(2, vs, fs);
     grid_program = make_shader_program(3, grid_vs, grid_gs, grid_fs);
