@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
 
     unsigned char* img = SOIL_load_image(argv[1], &width, &height, NULL, SOIL_LOAD_RGB);
     const size_t total_size = (size_t)width * (size_t)height * 3;
-    printf("const struct {int width; int height; unsigned char img[%zu];} "
+    printf("static const struct {int width; int height; unsigned char img[%zu];} "
            "bitmap_font_img = {%d, %d, {\n", total_size, width, height);
     for (size_t i = 0; i < total_size - 1; ++i) {
         printf("%d,", img[i]);

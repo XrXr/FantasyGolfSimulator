@@ -26,8 +26,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    int xadvance;
     for (int i = 0; i < n; ++i) {
-        int id, x, y, width, height, xoffset, yoffset, xadvance, page, chnl;
+        int id, x, y, width, height, xoffset, yoffset, page, chnl;
         num_read = fscanf(font_info,
             "char id=%d x=%d y=%d width=%d height=%d xoffset=%d "
             "yoffset=%d xadvance=%d page=%d chnl=%d\n",
@@ -40,7 +41,7 @@ int main(int argc, char **argv) {
         }
 
         if (i == 0) {
-            printf("const struct{ int x_advance;"
+            printf("static const struct{ int x_advance;"
                    "int num_char; struct {int x, y, width, height, x_offset, "
                                       "y_offset;} chars[%d];} "
                    "bitmap_font_meta = {%d, %d, {\n", n, xadvance, n);
@@ -53,4 +54,5 @@ int main(int argc, char **argv) {
         }
     }
     puts("}};\n");
+    printf("#define GOLF_CHAR_WIDTH %d\n", xadvance);
 }

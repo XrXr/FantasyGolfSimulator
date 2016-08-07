@@ -14,16 +14,44 @@ include_directories(
     ${GLEW_INCLUDE_DIR}
 )
 
+add_executable(bitmap_img build_time_generation/bitmap_img)
+target_link_libraries(bitmap_img SOIL ${OPENGL_LIBRARIES})
+
+add_executable(bitmap_meta build_time_generation/bitmap_meta)
+
+set(gen_dir ${CMAKE_SOURCE_DIR}/build_time_generation)
+
+add_custom_command(
+    OUTPUT bitmap_font_meta.h
+    COMMAND ${CMAKE_COMMAND}
+        -DEXE_COMMAND=bitmap_meta
+        -DARG_ONE=${gen_dir}/dvmono.fnt
+        -DOUTPUT_PATH=${CMAKE_BINARY_DIR}/bitmap_font_meta.h
+        -P ${gen_dir}/save_standard_out.cmake
+)
+
+add_custom_command(
+    OUTPUT bitmap_font_img.h
+    COMMAND ${CMAKE_COMMAND}
+        -DEXE_COMMAND=bitmap_img
+        -DARG_ONE=${gen_dir}/dvmono_0.png
+        -DOUTPUT_PATH=${CMAKE_BINARY_DIR}/bitmap_font_img.h
+        -P ${gen_dir}/save_standard_out.cmake
+)
+
 file(GLOB project_src
     "*.h"
     "*.c"
 )
 
-add_executable(golf_sim ${project_src})
+add_executable(golf_sim
+    ${project_src}
+    bitmap_font_meta.h
+    bitmap_font_img.h
+)
 target_link_libraries(golf_sim
     ${OPENGL_LIBRARIES}
     ${GLUT_LIBRARIES}
     ${GLEW_LIBRARIES}
     m
 )
-

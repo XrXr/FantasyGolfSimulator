@@ -18,6 +18,8 @@
 #include "font.h"
 #include "text_box.h"
 
+#include "build/bitmap_font_meta.h"
+
 #define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
 #define min(X, Y)  (X < Y ? X : Y)
 
@@ -633,8 +635,8 @@ void draw(void) {
         render_string("Angle", 20, 180, &font_vert_buf_offset);
         render_string("Power", 20, 265, &font_vert_buf_offset);
 
-        // TODO xadvance here
-        const int screen_right = screen_width - 19 * 10 - fields[0].width - 60;
+        const int screen_right = screen_width -
+            GOLF_CHAR_WIDTH * 10 - fields[0].width - 60;
         render_string("Wind Angle", screen_right, 180, &font_vert_buf_offset);
         render_string("Wind Speed", screen_right, 265, &font_vert_buf_offset);
     }
@@ -659,9 +661,8 @@ void draw(void) {
         check_errors("fill box frames buffer");
         if (blinker_present && active_field) {
             const size_t num_chars = strlen(active_field->content);
-            // TODO: build time insert named struct for x_advance
             const float blinker_x = active_field->x + TEXT_BOX_PADDING +
-                                    num_chars * 19;
+                                    num_chars * GOLF_CHAR_WIDTH;
             const float verts[] = {
                 blinker_x,
                 active_field->y + TEXT_BOX_PADDING,
