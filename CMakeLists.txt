@@ -22,50 +22,42 @@ add_executable(string_var build_time_generation/string_var)
 
 set(gen_dir ${CMAKE_SOURCE_DIR}/build_time_generation)
 
-add_custom_command(
-    OUTPUT bitmap_font_meta.h
-    DEPENDS bitmap_img
-    DEPENDS ${gen_dir}/dvmono.fnt
-    COMMAND ${CMAKE_COMMAND}
-        -DEXE_COMMAND=bitmap_meta
-        -DARG_ONE=${gen_dir}/dvmono.fnt
-        -DOUTPUT_PATH=${CMAKE_BINARY_DIR}/bitmap_font_meta.h
-        -P ${gen_dir}/save_standard_out.cmake
-)
+set(asset_headers "")
 
-add_custom_command(
-    OUTPUT bitmap_font_img.h
-    DEPENDS bitmap_img
-    DEPENDS ${gen_dir}/dvmono_0.png
-    COMMAND ${CMAKE_COMMAND}
-        -DEXE_COMMAND=bitmap_img
-        -DARG_ONE=${gen_dir}/dvmono_0.png
-        -DOUTPUT_PATH=${CMAKE_BINARY_DIR}/bitmap_font_img.h
-        -P ${gen_dir}/save_standard_out.cmake
-)
+function(generate_asset_header header_name asset_path tool)
+    if(${ARGC} GREATER 3)
+        set(extra_arg ${ARGV3})
+    endif(${ARGC} GREATER 3)
 
-add_custom_command(
-    OUTPUT golf_ball_mesh.h
-    DEPENDS string_var
-    DEPENDS ${gen_dir}/golf_ball.obj
-    COMMAND ${CMAKE_COMMAND}
-        -DEXE_COMMAND=string_var
-        -DARG_ONE=${gen_dir}/golf_ball.obj
-        -DARG_TWO="GOLF_BALL_MESH"
-        -DOUTPUT_PATH=${CMAKE_BINARY_DIR}/golf_ball_mesh.h
-        -P ${gen_dir}/save_standard_out.cmake
-)
+    list(APPEND asset_headers ${header_name})
+    set(asset_headers ${asset_headers} PARENT_SCOPE)
 
-add_custom_command(
-    OUTPUT wind_arrow_mesh.h
-    DEPENDS string_var
-    DEPENDS ${gen_dir}/arrow.obj
-    COMMAND ${CMAKE_COMMAND}
-        -DEXE_COMMAND=string_var
-        -DARG_ONE=${gen_dir}/arrow.obj
-        -DARG_TWO="WIND_ARROW_MESH"
-        -DOUTPUT_PATH=${CMAKE_BINARY_DIR}/wind_arrow_mesh.h
-        -P ${gen_dir}/save_standard_out.cmake
+    add_custom_command(
+        OUTPUT ${header_name}
+        DEPENDS ${tool}
+        DEPENDS ${asset_path}
+        COMMAND ${CMAKE_COMMAND}
+            -DEXE_COMMAND=${tool}
+            -DARG_ONE=${asset_path}
+            -DARG_TWO=${extra_arg}
+            -DOUTPUT_PATH=${CMAKE_BINARY_DIR}/${header_name}
+            -P ${gen_dir}/save_standard_out.cmake
+    )
+endfunction(generate_asset_header)
+
+generate_asset_header(bitmap_font_meta.h "${gen_dir}/dvmono.fnt" bitmap_meta)
+generate_asset_header(bitmap_font_img.h ${gen_dir}/dvmono_0.png bitmap_img)
+generate_asset_header(
+    golf_ball_mesh.h
+    ${gen_dir}/golf_ball.obj
+    string_var
+    GOLF_BALL_MESH
+)
+generate_asset_header(
+    wind_arrow_mesh.h
+    ${gen_dir}/arrow.obj
+    string_var
+    WIND_ARROW_MESH
 )
 
 file(GLOB project_src
@@ -75,10 +67,7 @@ file(GLOB project_src
 
 add_executable(golf_sim
     ${project_src}
-    bitmap_font_meta.h
-    bitmap_font_img.h
-    golf_ball_mesh.h
-    wind_arrow_mesh.h
+    ${asset_headers}
 )
 target_link_libraries(golf_sim
     ${OPENGL_LIBRARIES}

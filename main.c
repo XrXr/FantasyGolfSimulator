@@ -19,10 +19,6 @@
 #include "build/golf_ball_mesh.h"
 #include "build/wind_arrow_mesh.h"
 
-#define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
-#define min(X, Y)  (X < Y ? X : Y)
-#define deg_to_rad(X) (X * (M_PI / 180))
-
 const char* vertex_shader =
 "#version 330 core\n"
 
@@ -271,15 +267,6 @@ vec3 calc_lookat(const vec3 eye, const float y_rotate, const float x_rotate) {
     };
 
     return normalize3(result);
-}
-
-vec3 cross(const vec3 a, const vec3 b) {
-    const vec3 ret = {
-        a.y * b.z - b.y * a.z,
-        a.z * b.x - b.z * a.x,
-        a.x * b.y - b.x * a.y
-    };
-    return ret;
 }
 
 void matrix_mul_2(float (*a)[16], float (*b)[16], float (*out)[16]) {
