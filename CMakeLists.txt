@@ -5,6 +5,12 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
 
+if(WIN32)
+    add_definitions(-D__USE_MINGW_ANSI_STDIO=1)
+    add_definitions(-DGLEW_STATIC)
+    add_definitions(-DFREEGLUT_STATIC)
+endif(WIN32)
+
 find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
@@ -38,7 +44,7 @@ macro(generate_asset_header header_name asset_path tool)
         DEPENDS ${tool}
         DEPENDS ${asset_path}
         COMMAND ${CMAKE_COMMAND}
-            -DEXE_COMMAND=${tool}
+            -DEXE_COMMAND=$<TARGET_FILE:${tool}>
             -DARG_ONE=${asset_path}
             -DARG_TWO=${extra_arg}
             -DOUTPUT_PATH=${CMAKE_BINARY_DIR}/${header_name}
@@ -87,13 +93,18 @@ file(GLOB project_src
     "*.c"
 )
 
+set(libs
+    ${GLUT_LIBRARIES}
+    ${GLEW_LIBRARIES}
+    ${OPENGL_LIBRARIES}
+    m
+)
+if(WIN32)
+    list(APPEND libs winmm)
+endif(WIN32)
+
 add_executable(golf_sim
     ${project_src}
     ${asset_headers}
 )
-target_link_libraries(golf_sim
-    ${OPENGL_LIBRARIES}
-    ${GLUT_LIBRARIES}
-    ${GLEW_LIBRARIES}
-    m
-)
+target_link_libraries(golf_sim ${libs})

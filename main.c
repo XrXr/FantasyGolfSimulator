@@ -64,6 +64,7 @@ struct { bool up, down, left, right; } arrow_key;
 float y_rot_angle = 0;
 float x_rot_angle = 0;
 uint64_t last_sim_stamp = 0;
+uint64_t last_mouse_warp = 0;
 float pers_matrix[16];
 size_t golf_mesh_vert_count, wind_arrow_vert_count;
 int screen_width;
@@ -100,6 +101,8 @@ float wind_angle = 0;
 float hwi = 0;
 float vwi = 0;
 float wind_speed = 1;
+int mouse_last_x;
+int mouse_last_y;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -330,8 +333,6 @@ void draw(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glUseProgram(shader_program);
-    glUniformMatrix4fv(glGetUniformLocation(grid_program, "pers_matrix"),
-                       1, GL_FALSE, pers_matrix);
     glUniformMatrix4fv(post_pers_trans_uni, 1, GL_FALSE, id);
 
     float camera_trans[16];
@@ -497,10 +498,10 @@ void draw(void) {
         render_string("Angle", 20, 180, &font_vert_buf_offset);
         render_string("Power", 20, 265, &font_vert_buf_offset);
 
-        const float screen_right = screen_width -
+        const float window_right = window_width -
             GOLF_CHAR_WIDTH * 10 - fields[0].width - 60;
-        render_string("Wind Angle", screen_right, 180, &font_vert_buf_offset);
-        render_string("Wind Speed", screen_right, 265, &font_vert_buf_offset);
+        render_string("Wind Angle", window_right, 180, &font_vert_buf_offset);
+        render_string("Wind Speed", window_right, 265, &font_vert_buf_offset);
     }
 
     // two for pos and two for texture coord
@@ -508,8 +509,8 @@ void draw(void) {
     check_errors("draw text");
 
     if (display_ui) {
-        const int screen_right = screen_width - fields[0].width - 30;
-        fields[WIND_ANGLE_FIELD].x = fields[WIND_SPEED_FIELD].x = screen_right;
+        const int window_right = window_width - fields[0].width - 30;
+        fields[WIND_ANGLE_FIELD].x = fields[WIND_SPEED_FIELD].x = window_right;
 
         glUseProgram(ui_program);
         glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
@@ -550,7 +551,16 @@ void draw(void) {
 }
 
 void idle(void) {
-    if (window_has_focus && free_cam_mode) {
+    uint64_t t;
+    bool ret = elapsed_ns(&t);
+    if (!ret) return;
+
+    const uint64_t WARP_INTERVAL = 150000000ull;
+
+    if (window_has_focus && free_cam_mode && (t - last_mouse_warp) > WARP_INTERVAL) {
+        last_mouse_warp = t;
+        mouse_last_x = window_width / 2;
+        mouse_last_y = window_height / 2;
         glutWarpPointer(window_width / 2, window_height / 2);
     }
 }
@@ -635,17 +645,13 @@ float clamp(float x, float lower, float higher) {
 
 void mouse_movement(int x, int y) {
     if (free_cam_mode) {
-        const int x_half = x / 2;
-        const int y_half = y / 2;
-        float dist_from_center = sqrt(x_half * x_half + y_half * y_half);
-        if (dist_from_center > 0) {
-            const int center_x = window_width / 2;
-            const int center_y = window_height / 2;
-            y_rot_angle += (float)(x - center_x) / screen_width * 360;
-            const float propose_x = x_rot_angle +
-                (float)(y - center_y) / screen_height * 360;
-            x_rot_angle = clamp(propose_x, -90, 90);
-        }
+        y_rot_angle += (float)(x - mouse_last_x) / screen_width * 360;
+        const float propose_x = x_rot_angle +
+            (float)(y - mouse_last_y) / screen_height * 360;
+        x_rot_angle = clamp(propose_x, -90, 90);
+
+        mouse_last_x = x;
+        mouse_last_y = y;
     }
 }
 
@@ -818,11 +824,13 @@ GLuint read_mesh(const char* obj_text, size_t* vert_count_out) {
 int main(int argc, char **argv) {
     glutInitContextVersion(3, 3);
     glewExperimental = GL_TRUE;
+
     glutInit(&argc, argv);
-    glutInitWindowSize(320, 320);
-    glutCreateWindow("Fantasy Golf Simulator");
     screen_width = glutGet(GLUT_SCREEN_WIDTH);
     screen_height = glutGet(GLUT_SCREEN_HEIGHT);
+    glutInitWindowSize(1366, 768);
+    glutInitWindowPosition(0, 0);
+    glutCreateWindow("Fantasy Golf Simulator");
     glutPassiveMotionFunc(mouse_movement);
     glutMouseFunc(mouse_click);
 
@@ -854,9 +862,9 @@ int main(int argc, char **argv) {
     GLuint grid_fs = compile_shader(GL_FRAGMENT_SHADER, GRID_FS);
 
     shader_program = make_shader_program(2, vs, fs);
-    grid_program = make_shader_program(3, grid_vs, grid_gs, grid_fs);
     ui_program = make_shader_program(2, window_vs, ui_fs);
     window_space_program = make_shader_program(2, window_vs, font_fs);
+    grid_program = make_shader_program(3, grid_gs, grid_vs, grid_fs);
 
     GLuint vao;
     glGenVertexArrays(1, &vao);
@@ -933,6 +941,16 @@ int main(int argc, char **argv) {
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+
+    #ifdef _WIN32
+        HWND win_handle = FindWindow(0, "Fantasy Golf Simulator");
+        if (!win_handle) {
+            printf("!!! Failed FindWindow\n");
+            return -1;
+        }
+        ShowWindowAsync(win_handle, SW_SHOWMAXIMIZED);
+    #endif
 
     check_errors("init");
 
