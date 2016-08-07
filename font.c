@@ -39,30 +39,23 @@ void render_char(const char c, float x, float y,
     int bottom_right_x = top_right_x;
     int bottom_right_y = bottom_left_y;
 
-    // TODO: lots of dups, should use index drawing
     float full_quad[] = {
         top_left_x, top_left_y,
-        width, height,
         tex_x, tex_y,
 
         top_right_x, top_right_y,
-        width, height,
         tex_x + width, tex_y,
 
         bottom_left_x, bottom_left_y,
-        width, height,
         tex_x, tex_y + height,
 
         top_right_x, top_right_y,
-        width, height,
         tex_x + width, tex_y,
 
         bottom_right_x, bottom_right_y,
-        width, height,
         tex_x + width, tex_y + height,
 
         bottom_left_x, bottom_left_y,
-        width, height,
         tex_x, tex_y + height,
     };
     glBufferSubData(GL_ARRAY_BUFFER, *buf_offset, sizeof(full_quad),

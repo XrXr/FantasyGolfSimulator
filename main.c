@@ -69,8 +69,7 @@ const char* window_space_vertex_shader =
 "#version 330\n"
 
 "layout(location = 0) in vec2 position;"
-"layout(location = 1) in vec2 char_dimentions;"
-"layout(location = 2) in vec2 tc;"
+"layout(location = 1) in vec2 tc;"
 "out vec2 tex_coord;"
 "out vec2 c_dimentions;"
 "layout(std140) uniform shared {"
@@ -617,13 +616,11 @@ void draw(void) {
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
     glEnableVertexAttribArray(1);
     glEnableVertexAttribArray(2);
-    const int stride = sizeof(float) * 2 * 3;
+    const int stride = sizeof(float) * 2 * 2;
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, 0);
-    // TODO REMOVE
+    // texture coord
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride,
                           (const void *) (sizeof(float) * 2));
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride,
-                          (const void *) (sizeof(float) * 2 * 2));
 
     char flight_time_str[100];
     sprintf(flight_time_str, "t=%.4f", flight_time);
@@ -644,7 +641,8 @@ void draw(void) {
 
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, 0);
-    glDrawArrays(GL_TRIANGLES, 0, font_vert_buf_offset / sizeof(float) / 6);
+    // two for pos and two for texture coord
+    glDrawArrays(GL_TRIANGLES, 0, font_vert_buf_offset / sizeof(float) / 4);
     check_errors("draw text");
 
     if (display_ui) {
