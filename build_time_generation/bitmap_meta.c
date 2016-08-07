@@ -1,7 +1,7 @@
 #include <stdio.h>
 #define MAX_LINE_LEN 1000
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
     if (argc < 2) {
         printf("Usage: ./bitmap_meta <path to .fnt>\n");
         return 0;
@@ -55,4 +55,5 @@ int main(int argc, char **argv) {
     }
     puts("}};\n");
     printf("#define GOLF_CHAR_WIDTH %d\n", xadvance);
+    fclose(font_info);
 }

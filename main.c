@@ -1,5 +1,7 @@
 #include <GL/glew.h>
 #include <GL/freeglut.h>
+#define TINYOBJ_LOADER_C_IMPLEMENTATION
+#include "tinyobj_loader_c.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -7,21 +9,19 @@
 #include <math.h>
 #include <stdbool.h>
 
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/stat.h>
-
-#define TINYOBJ_LOADER_C_IMPLEMENTATION
-#include "tinyobj_loader_c.h"
 #include "common.h"
 #include "clock.h"
 #include "font.h"
 #include "text_box.h"
 
+// asset inserts
 #include "build/bitmap_font_meta.h"
+#include "build/golf_ball_mesh.h"
+#include "build/wind_arrow_mesh.h"
 
 #define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
 #define min(X, Y)  (X < Y ? X : Y)
+#define deg_to_rad(X) (X * (M_PI / 180))
 
 const char* vertex_shader =
 "#version 330 core\n"
@@ -176,9 +176,6 @@ const char* grid_frag_shader =
 "{"
 "   output_color = color.a * color;"
 "}";
-
-
-#define deg_to_rad(X) (X * (M_PI / 180))
 
 GLuint shader_program;
 GLuint ui_program;
@@ -903,32 +900,17 @@ GLuint make_shader_program(int n, ...) {
     return program;
 }
 
-// TODO: embed the mesh into the binary
-char* read_obj(const char* file_name, size_t* buf_len) {
-    int fd = open(file_name, O_RDONLY);
-    struct stat sd;
-
-    fstat(fd, &sd);
-    *buf_len = sd.st_size + 1;
-    char* buf = malloc(sd.st_size + 1);
-    read(fd, buf, sd.st_size);
-    buf[sd.st_size] = 0;
-    close(fd);
-    return buf;
-}
-
-GLuint read_mesh(const char* file_name, size_t* vert_count_out) {
+GLuint read_mesh(const char* obj_text, size_t* vert_count_out) {
     GLuint gl_buf;
     glGenBuffers(1, &gl_buf);
-    size_t filesize;
-    char* buf = read_obj(file_name, &filesize);
+    size_t len = strlen(obj_text);
 
     tinyobj_attrib_t attrib;
     tinyobj_shape_t* shapes;
     tinyobj_material_t* materials;
     size_t nshape, nmat;
     tinyobj_parse_obj(&attrib, &shapes, &nshape, &materials, &nmat,
-                      buf, filesize, TINYOBJ_FLAG_TRIANGULATE);
+                      obj_text, len, TINYOBJ_FLAG_TRIANGULATE);
 
     *vert_count_out = attrib.num_face_num_verts * 3;
     const size_t mesh_size = *vert_count_out * sizeof(vec3) * 2;
@@ -1083,8 +1065,8 @@ int main(int argc, char **argv) {
     glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 2, NULL, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
 
-    golf_ball_buf = read_mesh("golf_ball.obj", &golf_mesh_vert_count);
-    wind_arrow_buf = read_mesh("arrow.obj", &wind_arrow_vert_count);
+    golf_ball_buf = read_mesh(GOLF_BALL_MESH, &golf_mesh_vert_count);
+    wind_arrow_buf = read_mesh(WIND_ARROW_MESH, &wind_arrow_vert_count);
 
     glEnable(GL_PRIMITIVE_RESTART);
     glEnable(GL_DEPTH_TEST);
