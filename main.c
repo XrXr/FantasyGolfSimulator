@@ -19,6 +19,7 @@
 #include "text_box.h"
 
 #define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
+#define min(X, Y)  (X < Y ? X : Y)
 
 const char* vertex_shader =
 "#version 330 core\n"
@@ -225,11 +226,14 @@ const size_t NUM_FILEDS = 2;
 const size_t ANGLE_FIELD = 0;
 const size_t POWER_FIELD = 1;
 const size_t WIND_ANGLE_FIELD = 2;
-#define NUM_FILEDS 3
+const size_t WIND_SPEED_FIELD = 3;
+#define NUM_FILEDS 4
 text_box_t fields[] = {
     {375, 50, 150, 175, false, 10, "25", text_box_positive_nums_only},
     {375, 50, 150, 260, false, 10, "500", text_box_positive_nums_only},
-    {375, 50, 150, 345, false, 10, "0", text_box_positive_nums_only},
+    // x for these calculated based on screen size
+    {375, 50, 0, 175, false, 10, "0", text_box_positive_nums_only},
+    {375, 50, 0, 260, false, 10, "1", text_box_positive_nums_only},
 };
 text_box_t* active_field = NULL;
 float flight_time = 0;
@@ -241,7 +245,9 @@ size_t trail_buf_offset = sizeof(vec3);
 float last_trail_sample_time;
 bool blinker_present = false;
 float wind_angle = 0;
-float x_wind_influence = 0;
+float hwi = 0;
+float vwi = 0;
+float wind_speed = 1;
 
 vec3 normalize3(const vec3 v) {
     const float len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -361,7 +367,7 @@ float dot3(const vec3 a, const vec3 b) {
 }
 
 float flight_x(const float t) {
-    return x_wind_influence * t * 30;
+    return hwi * t * 30;
 }
 
 float flight_y(const float t) {
@@ -369,7 +375,7 @@ float flight_y(const float t) {
 }
 
 float flight_z(const float t) {
-    return -((z_launch_speed * t) - ((t*t*t) / 3));
+    return -((z_launch_speed * t) - (vwi * (t*t*t) / 3));
 }
 
 void flight_init(void) {
@@ -383,7 +389,9 @@ void flight_init(void) {
     z_launch_speed = power * cos(rad_angle);
     y_launch_speed = power * sin(rad_angle);
 
-    x_wind_influence = -sin(wind_angle);
+    const float rad_wind_angle = deg_to_rad(wind_angle);
+    hwi = -sin(rad_wind_angle) * wind_speed;
+    vwi = -cos(rad_wind_angle) * wind_speed;
 
     glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
     glBufferData(GL_ARRAY_BUFFER, TRAIL_BUF_SIZE, NULL, GL_DYNAMIC_DRAW);
@@ -408,7 +416,12 @@ void draw(void) {
 
     blinker_present = ((t / 1000000000) % 2) == 0;
 
-    const float wind_arrow_y_rot = (t % 10000000000) / 9999999999.0f * 364;
+    float wind_arrow_y_rot = 0;
+    if (wind_speed != 0) {
+        size_t r_time = 10000000000 / wind_speed;
+        // wind_arrow_y_rot = (float)(t % r_time) / (r_time - 1) * 365;
+        wind_arrow_y_rot = (float)(t % r_time) / (r_time - 1) * 360.0f;
+    }
 
     if (free_cam_mode) {
         int in_out_dir = 0;
@@ -460,8 +473,10 @@ void draw(void) {
     const float id[16] = {[0]=1, [5]=1, [10]=1, [15]=1};
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glUseProgram(shader_program);
 
+    glUseProgram(shader_program);
+    glUniformMatrix4fv(glGetUniformLocation(grid_program, "pers_matrix"),
+                       1, GL_FALSE, pers_matrix);
     glUniformMatrix4fv(post_pers_trans_uni, 1, GL_FALSE, id);
 
     float camera_trans[16];
@@ -615,6 +630,11 @@ void draw(void) {
             text_box_render_font(fields + i, &font_vert_buf_offset);
         render_string("Angle", 20, 180, &font_vert_buf_offset);
         render_string("Power", 20, 265, &font_vert_buf_offset);
+
+        // TODO xadvance here
+        const int screen_right = screen_width - 19 * 10 - fields[0].width - 60;
+        render_string("Wind Angle", screen_right, 180, &font_vert_buf_offset);
+        render_string("Wind Speed", screen_right, 265, &font_vert_buf_offset);
     }
 
     glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
@@ -623,6 +643,9 @@ void draw(void) {
     check_errors("draw text");
 
     if (display_ui) {
+        const int screen_right = screen_width - fields[0].width - 30;
+        fields[WIND_ANGLE_FIELD].x = fields[WIND_SPEED_FIELD].x = screen_right;
+
         glUseProgram(ui_program);
         glBindBuffer(GL_ARRAY_BUFFER, ui_vert_buf);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_idx_buf);
@@ -744,6 +767,12 @@ void handle_special_release(int key, int x, int y) {
     set_arrow_key_state(key, false);
 }
 
+float clamp(float x, float lower, float higher) {
+    if (x < lower) return lower;
+    if (x > higher) return higher;
+    return x;
+}
+
 void mouse_movement(int x, int y) {
     if (free_cam_mode) {
         const int x_half = x / 2;
@@ -752,8 +781,10 @@ void mouse_movement(int x, int y) {
         if (dist_from_center > 0) {
             const int center_x = window_width / 2;
             const int center_y = window_height / 2;
-            y_rot_angle += (float)(x - center_x) / screen_width * 365;
-            x_rot_angle += (float)(y - center_y) / screen_height * 365;
+            y_rot_angle += (float)(x - center_x) / screen_width * 360;
+            const float propose_x = x_rot_angle +
+                (float)(y - center_y) / screen_height * 360;
+            x_rot_angle = clamp(propose_x, -90, 90);
         }
     }
 }
@@ -777,6 +808,8 @@ void input_to_active_field(unsigned char key) {
 
     if (fields[WIND_ANGLE_FIELD].active) {
         sscanf(fields[WIND_ANGLE_FIELD].content, "%f", &wind_angle);
+    } else if (fields[WIND_SPEED_FIELD].active) {
+        sscanf(fields[WIND_SPEED_FIELD].content, "%f", &wind_speed);
     }
 }
 
@@ -1057,7 +1090,6 @@ int main(int argc, char **argv) {
 
     check_errors("init");
 
- //   glutFullScreen();
     glutMainLoop();
     return 0;
 }
