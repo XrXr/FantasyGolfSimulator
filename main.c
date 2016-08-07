@@ -54,13 +54,14 @@ const char* frag_shader =
 "out vec4 output_color;"
 "uniform vec4 force_color;"
 "uniform vec3 light_color = vec3(1);"
+"uniform vec3 surface_color;"
 "void main()"
 "{"
 "   vec3 norm = normalize(nnormal);"
 "   vec3 light_dir = normalize(lp - frag_world_pos);"
 "   float diff = max(dot(light_dir, norm), 0.0);"
 "   vec3 diffuse = diff * light_color;"
-"   output_color = max(vec4(diffuse, 1.0), force_color);"
+"   output_color = max(vec4(diffuse * surface_color, 1.0), force_color);"
 "}";
 
 
@@ -182,20 +183,21 @@ GLuint shader_program;
 GLuint ui_program;
 GLuint window_space_program;
 GLuint grid_program;
-GLuint window_dimentions_uni;
 GLuint golf_ball_buf;
 GLuint wind_arrow_buf;
 GLuint grid_buffer;
-GLuint post_pers_trans_uni;
-GLuint force_color_uni;
-GLuint camera_trans_uni;
-GLuint pers_matrix_uni;
-GLuint grid_num_hori_uni;
 GLuint model_to_world;
 GLuint trail_buffer;
 GLuint text_vbo;
 GLuint ui_vert_buf;
 GLuint ui_idx_buf;
+GLuint window_dimentions_uni;
+GLuint post_pers_trans_uni;
+GLuint force_color_uni;
+GLuint camera_trans_uni;
+GLuint pers_matrix_uni;
+GLuint grid_num_hori_uni;
+GLuint surface_color_uni;
 
 void camera_pan(vec3* look, float factor);
 void camera_move_in(vec3* look, float factor);
@@ -512,6 +514,7 @@ void draw(void) {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), 0);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
                           (const void*) (sizeof(vec3)));
+    glUniform3f(surface_color_uni, 1, 1, 1);
     glDrawArrays(GL_TRIANGLES, 0, golf_mesh_vert_count);
     check_errors("draw golf ball");
 
@@ -585,6 +588,7 @@ void draw(void) {
         glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*)(3 * sizeof(GLfloat)));
         glUniform4f(force_color_uni, 0, 0, 0, 0);
         glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, id);
+        glUniform3f(surface_color_uni, .8, .337, .323);
         glDrawArrays(GL_TRIANGLES, 0, wind_arrow_vert_count);
         check_errors("draw wind arrow");
     }
@@ -1023,6 +1027,7 @@ int main(int argc, char **argv) {
     model_to_world = glGetUniformLocation(shader_program, "model_to_world");
     force_color_uni = glGetUniformLocation(shader_program, "force_color");
     post_pers_trans_uni = glGetUniformLocation(shader_program, "post_pers_trans");
+    surface_color_uni = glGetUniformLocation(shader_program, "surface_color");
     window_dimentions_uni = glGetUniformLocation(window_space_program,
                                                  "window_dimentions");
     grid_num_hori_uni = glGetUniformLocation(grid_program, "num_hori_line");
