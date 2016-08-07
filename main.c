@@ -109,9 +109,9 @@ vec3 normalize3(const vec3 v) {
         v.z / len
     };
     return ret;
-};
+}
 
-vec3 calc_lookat(const vec3 eye, const float y_rotate, const float x_rotate) {
+vec3 calc_lookat(const float y_rotate, const float x_rotate) {
     const float rot_rad = y_rotate * (M_PI / 180);
     const float x_roate_rad = x_rotate * (M_PI / 180);
     const float cos_a = cos(rot_rad);
@@ -252,6 +252,11 @@ void draw(void) {
     // sim
     uint64_t t;
     bool ret = elapsed_ns(&t);
+    if (!ret) {
+        printf("Failed to get elapsed time\n");
+        glutLeaveMainLoop();
+        return;
+    }
     const uint64_t since_last = t - last_sim_stamp;
     const float seconds_since_last = since_last / 1000000000.0f;
     const float step = CAMERA_SPEED * seconds_since_last;
@@ -280,7 +285,7 @@ void draw(void) {
         y_translate_dir += key_buf['q'] * -1;
         y_translate_dir += key_buf['e'];
 
-        vec3 look = calc_lookat(camera_pos, y_rot_angle, x_rot_angle);
+        vec3 look = calc_lookat(y_rot_angle, x_rot_angle);
         camera_pan(&look, pan_dir * step);
         camera_move_in(&look, in_out_dir * step);
         camera_y_translate(y_translate_dir * step);
@@ -492,14 +497,12 @@ void draw(void) {
         render_string("Angle", 20, 180, &font_vert_buf_offset);
         render_string("Power", 20, 265, &font_vert_buf_offset);
 
-        const int screen_right = screen_width -
+        const float screen_right = screen_width -
             GOLF_CHAR_WIDTH * 10 - fields[0].width - 60;
         render_string("Wind Angle", screen_right, 180, &font_vert_buf_offset);
         render_string("Wind Speed", screen_right, 265, &font_vert_buf_offset);
     }
 
-    glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, 0);
     // two for pos and two for texture coord
     glDrawArrays(GL_TRIANGLES, 0, font_vert_buf_offset / sizeof(float) / 4);
     check_errors("draw text");
@@ -582,7 +585,8 @@ void leave_free_cam_mode(void) {
 void handle_key(unsigned char key, int x, int y) {
     // ctrl+q sends 17
     if (key == 17 && glutGetModifiers() == GLUT_ACTIVE_CTRL) {
-        return glutLeaveMainLoop();
+        glutLeaveMainLoop();
+        return;
     } else if (key == 27) {
         leave_free_cam_mode();
         if (active_field) {
@@ -721,7 +725,7 @@ GLuint compile_shader(GLenum shader_type, const char* shader_source) {
 
 GLuint make_shader_program(int n, ...) {
     va_list vl, vl_detach;
-    size_t i;
+    int i;
     GLuint program = glCreateProgram();
 
     va_start(vl, n);

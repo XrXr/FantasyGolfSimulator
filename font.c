@@ -1,5 +1,6 @@
 #include <GL/glew.h>
 #include "font.h"
+#include <assert.h>
 
 #include "build/bitmap_font_img.h"
 #include "build/bitmap_font_meta.h"
@@ -13,9 +14,10 @@ void render_string(const char* s, float x, float y, size_t* buf_offset) {
     }
 }
 
-void render_char(const char c, float x, float y,
+void render_char(const char c, const float x, const float y,
                  size_t* buf_offset) {
-    const int LINE_HEIGHT = 37;
+    if ((int) c - '!' < 0) return;
+
     int width = bitmap_font_meta.chars[c - '!'].width;
     int height = bitmap_font_meta.chars[c - '!'].height;
     int tex_x = bitmap_font_meta.chars[c - '!'].x;
