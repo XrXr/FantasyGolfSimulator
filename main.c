@@ -299,6 +299,8 @@ void draw(void) {
         space_released_once = true;
     }
 
+    const bool paused_this_frame = old_flying && !flying;
+
     if (flying) {
         if (golf_ball_pos.y <= 0) {
             flight_init();
@@ -308,6 +310,11 @@ void draw(void) {
         golf_ball_pos.x = flight_x(flight_time);
         golf_ball_pos.y = flight_y(flight_time);
         golf_ball_pos.z = flight_z(flight_time);
+    }
+
+    if (flying && golf_ball_pos.y < 0.0f) {
+        printf("Final z %f. Flight time %f \n", golf_ball_pos.z, flight_time);
+        flying = false;
     }
 
     const bool display_ui = !free_cam_mode || !flying;
@@ -363,10 +370,10 @@ void draw(void) {
         glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
 
         const float dt = flight_time - last_trail_sample_time;
-        const size_t n_verts = floor(dt / TRAIL_SAMPLE_FREQ);
+        const size_t n_verts = floor(dt / TRAIL_SAMPLE_FREQ) + paused_this_frame;
         const size_t upload_size = n_verts * sizeof(vec3);
         const bool enough_space = trail_buf_offset + upload_size <= TRAIL_BUF_SIZE;
-        if (flying && n_verts > 0 && enough_space) {
+        if (old_flying && n_verts > 0 && enough_space) {
             vec3* points = malloc(upload_size);
             size_t i = 0;
             float t = last_trail_sample_time + TRAIL_SAMPLE_FREQ;
@@ -374,6 +381,16 @@ void draw(void) {
                 points[i++] = (vec3){flight_x(t), flight_y(t), flight_z(t)};
             }
             last_trail_sample_time = t - TRAIL_SAMPLE_FREQ;
+
+            if (paused_this_frame) {
+                last_trail_sample_time = flight_time;
+                points[i++] = (vec3){
+                    flight_x(flight_time),
+                    flight_y(flight_time),
+                    flight_z(flight_time)
+                };
+            }
+
             if (i == n_verts) {
                 glBufferSubData(GL_ARRAY_BUFFER, trail_buf_offset, upload_size,
                                 points);
@@ -523,11 +540,6 @@ void draw(void) {
         glDrawElements(GL_LINE_STRIP, idx_offset / sizeof(unsigned short),
                        GL_UNSIGNED_SHORT, 0);
         check_errors("draw text box frames");
-    }
-
-    if (flying && golf_ball_pos.y < 0.0f) {
-        printf("Final z %f. Flight time %f \n", golf_ball_pos.z, flight_time);
-        flying = false;
     }
 
     glutSwapBuffers();
