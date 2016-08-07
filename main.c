@@ -60,7 +60,7 @@ const char* frag_shader =
 "   vec3 light_dir = normalize(lp - frag_world_pos);"
 "   float diff = max(dot(light_dir, norm), 0.0);"
 "   vec3 diffuse = diff * light_color;"
-"   output_color = vec4(diffuse, 1.0);"
+"   output_color = max(vec4(diffuse, 1.0), force_color);"
 "}";
 
 
@@ -515,7 +515,6 @@ void draw(void) {
     glDrawArrays(GL_TRIANGLES, 0, golf_mesh_vert_count);
     check_errors("draw golf ball");
 
-    glUniformMatrix4fv(model_to_world, 1, GL_FALSE, id);
     if (golf_ball_pos.z != 0) {  // draw the golf ball's trail
         glBindBuffer(GL_ARRAY_BUFFER, trail_buffer);
 
@@ -545,6 +544,8 @@ void draw(void) {
             }
             free(points);
         }
+        glUniformMatrix4fv(model_to_world, 1, GL_FALSE, id);
+        glUniform4f(force_color_uni, 1, 1, 1, 1);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
         assert(trail_buf_offset % (sizeof(float) * 3) == 0);
         glDrawArrays(GL_LINE_STRIP, 0, trail_buf_offset / (sizeof(float) * 3));
