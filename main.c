@@ -21,36 +21,45 @@
 #define print_vec3(V)  printf(#V": x=%f y=%f z=%f\n", V.x, V.y, V.z)
 
 const char* vertex_shader =
-"#version 330\n"
+"#version 330 core\n"
 
 "layout(location = 0) in vec3 position;"
-"out vec4 vertex_color;"
+"layout(location = 1) in vec3 normal_in;"
+"out vec3 nnormal;"
+"out vec3 frag_world_pos;"
+"out vec3 lp;"
 
 "uniform mat4 model_to_world;"
 "uniform mat4 pers_matrix;"
 "uniform mat4 camera_trans;"
+"uniform vec3 light_pos = vec3(0, 0, 2);"
 "uniform mat4 post_pers_trans;"
 
 "void main()"
 "{"
 "    vec4 pos = camera_trans * model_to_world * vec4(position, 1);"
 "    gl_Position = post_pers_trans * pers_matrix * pos;"
-"    mat3 modelToCameraM = mat3(camera_trans * model_to_world);"
-"    vec3 normCamSpace = normalize(modelToCameraM * position);"
-"    float cosAngIncidence = dot(normCamSpace, position);"
-"    cosAngIncidence = clamp(cosAngIncidence, 0, 1);"
-"    vertex_color = cosAngIncidence * vec4(1, 1, 1, 1);"
+"    frag_world_pos = vec3(model_to_world * vec4(position, 1));"
+"    nnormal = mat3(transpose(inverse(model_to_world))) * normal_in;"
+"    lp = light_pos;"
 "}";
 
 const char* frag_shader =
-"#version 330\n"
+"#version 330 core\n"
 
+"in vec3 nnormal;"
+"in vec3 frag_world_pos;"
+"in vec3 lp;"
 "out vec4 output_color;"
-"in vec4 vertex_color;"
 "uniform vec4 force_color;"
+"uniform vec3 light_color = vec3(1);"
 "void main()"
 "{"
-"   output_color = max(vertex_color, force_color);"
+"   vec3 norm = normalize(nnormal);"
+"   vec3 light_dir = normalize(lp - frag_world_pos);"
+"   float diff = max(dot(light_dir, norm), 0.0);"
+"   vec3 diffuse = diff * light_color;"
+"   output_color = vec4(diffuse, 1.0);"
 "}";
 
 
@@ -399,7 +408,7 @@ void draw(void) {
 
     blinker_present = ((t / 1000000000) % 2) == 0;
 
-    const float wind_arrow_y_rot = (t % 2000000000) / 1999999999.0f * 365;
+    const float wind_arrow_y_rot = (t % 10000000000) / 9999999999.0f * 364;
 
     if (free_cam_mode) {
         int in_out_dir = 0;
@@ -450,7 +459,7 @@ void draw(void) {
 
     const float id[16] = {[0]=1, [5]=1, [10]=1, [15]=1};
     glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glUseProgram(shader_program);
 
     glUniformMatrix4fv(post_pers_trans_uni, 1, GL_FALSE, id);
@@ -484,7 +493,10 @@ void draw(void) {
 
     glBindBuffer(GL_ARRAY_BUFFER, golf_ball_buf);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), 0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                          (const void*) (sizeof(vec3)));
     glDrawArrays(GL_TRIANGLES, 0, golf_mesh_vert_count);
     check_errors("draw golf ball");
 
@@ -534,6 +546,7 @@ void draw(void) {
             [15]=1
         };
         mat4 rot = rotate(0, wind_arrow_y_rot, wind_angle);
+
         float (*(mult_ins)[2])[16] = {&translate, &rot.value};
         float mesh_model_trans[16];
         matrix_mul(mult_ins, 2, &mesh_model_trans);
@@ -550,7 +563,10 @@ void draw(void) {
     }
     if (display_ui) {
         glBindBuffer(GL_ARRAY_BUFFER, wind_arrow_buf);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*)0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*)(3 * sizeof(GLfloat)));
         glUniform4f(force_color_uni, 0, 0, 0, 0);
         glUniformMatrix4fv(camera_trans_uni, 1, GL_FALSE, id);
         glDrawArrays(GL_TRIANGLES, 0, wind_arrow_vert_count);
@@ -877,45 +893,42 @@ GLuint read_mesh(const char* file_name, size_t* vert_count_out) {
     tinyobj_parse_obj(&attrib, &shapes, &nshape, &materials, &nmat,
                       buf, filesize, TINYOBJ_FLAG_TRIANGULATE);
 
-    *vert_count_out = attrib.num_face_num_verts * 3 * 3;
-    const size_t mesh_size = attrib.num_face_num_verts * sizeof(float) * 3 * 3;
+    *vert_count_out = attrib.num_face_num_verts * 3;
+    const size_t mesh_size = *vert_count_out * sizeof(vec3) * 2;
     float* mesh = malloc(mesh_size);
 
     size_t mesh_offset = 0;
-    size_t face_offset = 0;
     for (size_t i = 0; i < attrib.num_face_num_verts; i++) {
         assert(attrib.face_num_verts[i] % 3 == 0); // all triangular faces
-        for (size_t f = 0; f < (size_t)attrib.face_num_verts[i]; f+=3) {
-            tinyobj_vertex_index_t idx0 = attrib.faces[face_offset + 3 * f + 0];
-            tinyobj_vertex_index_t idx1 = attrib.faces[face_offset + 3 * f + 1];
-            tinyobj_vertex_index_t idx2 = attrib.faces[face_offset + 3 * f + 2];
+        tinyobj_vertex_index_t idx0 = attrib.faces[i * 3 + 0];
+        tinyobj_vertex_index_t idx1 = attrib.faces[i * 3 + 1];
+        tinyobj_vertex_index_t idx2 = attrib.faces[i * 3 + 2];
 
-            for (int k = 0; k < 3; k++) {
-                int f0 = idx0.v_idx;
-                int f1 = idx1.v_idx;
-                int f2 = idx2.v_idx;
+        int f0 = idx0.v_idx;
+        int f1 = idx1.v_idx;
+        int f2 = idx2.v_idx;
 
-                mesh[mesh_offset + 0 + k] = attrib.vertices[3 * (size_t)f0 + k];
-                mesh[mesh_offset + 3 + k] = attrib.vertices[3 * (size_t)f1 + k];
-                mesh[mesh_offset + 6 + k] = attrib.vertices[3 * (size_t)f2 + k];
-            }
+        int n0 = idx0.vn_idx;
+        int n1 = idx1.vn_idx;
+        int n2 = idx2.vn_idx;
 
-            mesh_offset += 9;
+        for (int k = 0; k < 3; k++) {
+            mesh[mesh_offset + 0 + k] = attrib.vertices[3 * (size_t)f0 + k];
+            mesh[mesh_offset + 3 + k] = attrib.normals[3 * (size_t)n0 + k];
+
+            mesh[mesh_offset + 6 + k] = attrib.vertices[3 * (size_t)f1 + k];
+            mesh[mesh_offset + 9 + k] = attrib.normals[3 * (size_t)n1 + k];
+
+            mesh[mesh_offset + 12 + k] = attrib.vertices[3 * (size_t)f2 + k];
+            mesh[mesh_offset + 15 + k] = attrib.normals[3 * (size_t)n2 + k];
         }
-        face_offset += (size_t)attrib.face_num_verts[i];
+
+        mesh_offset += 18;
     }
 
     tinyobj_attrib_free(&attrib);
     tinyobj_shapes_free(shapes, nshape);
     tinyobj_materials_free(materials, nmat);
-
-    // for (int i = 0; i < attrib.num_face_num_verts; i++) {
-    //     for (int j = 0; j < 3; j++) {
-    //         printf("x=%f y=%f z%f\n", mesh[i * 9 + j * 3 + 0], mesh[i * 9 + j * 3 + 1], mesh[i * 9 + j * 3 + 2]);
-    //     }
-    // }
-
-    // printf("%d\n", golf_mesh_vert_count);
 
     glBindBuffer(GL_ARRAY_BUFFER, gl_buf);
     glBufferData(GL_ARRAY_BUFFER, mesh_size, mesh, GL_STATIC_DRAW);
@@ -986,10 +999,6 @@ int main(int argc, char **argv) {
     pers_matrix[14] = (2 * fzFar * fzNear) / (fzNear - fzFar);
     pers_matrix[11] = -1.0f;
 
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glFrontFace(GL_CW);
-
     glUseProgram(shader_program);
     glUniformMatrix4fv(pers_matrix_uni, 1, GL_FALSE, pers_matrix);
     glUseProgram(0);
@@ -1040,6 +1049,7 @@ int main(int argc, char **argv) {
     wind_arrow_buf = read_mesh("arrow.obj", &wind_arrow_vert_count);
 
     glEnable(GL_PRIMITIVE_RESTART);
+    glEnable(GL_DEPTH_TEST);
     glPrimitiveRestartIndex(GOLF_RESTART_IDX);
 
     glEnable(GL_BLEND);
