@@ -1,7 +1,7 @@
-#Fantasy Golf Simulator
+# Fantasy Golf Simulator
 ![Demo](http://i.imgur.com/oIPAKZQ.gif)
 
-#Building
+# Building
 The app should run on OpenGL 3.3+ capable hardware on 64 bit GNU/Linux and Windows.
 It is tested on Arch Linux and Windows 10.
 
