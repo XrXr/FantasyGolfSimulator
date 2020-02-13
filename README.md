@@ -21,5 +21,5 @@ Thanks to @syoyo for his mesh loader, tinyobjloader-c!
 # Why is there C++ and JavaScript code in the repo?
 
 There isn't. The whole app is done in C99 and GLSL.
-Github's [linguist](https://github.com/github/linguist) seem to not like
+Github's [linguist](https://github.com/github/linguist) seems to not like
 this repo.
